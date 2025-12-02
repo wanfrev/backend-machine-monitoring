@@ -1,0 +1,26 @@
+{
+  "users": [
+    {
+      "id": "1",
+      "username": "admin",
+      "passwordHash": "$2a$10$x.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z.z",
+      "role": "admin",
+      "name": "Administrador Principal"
+    }
+  ],
+  "machines": [
+    {
+      "id": "A-001",
+      "name": "Máquina de Boxeo 1",
+      "status": "active",
+      "location": "Sucursal Centro"
+    },
+    {
+      "id": "B-001",
+      "name": "Máquina de Agilidad 1",
+      "status": "inactive",
+      "location": "Sucursal Norte"
+    }
+  ],
+  "events": []
+}
