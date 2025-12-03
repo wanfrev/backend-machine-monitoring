@@ -26,7 +26,7 @@ export const createUser = async (req: Request, res: Response) => {
     const exists = await pool.query("SELECT 1 FROM users WHERE username = $1", [
       username,
     ]);
-    if (exists.rowCount > 0) {
+    if ((exists.rowCount ?? 0) > 0) {
       return res.status(400).json({ message: "Username already exists" });
     }
     const passwordHash = await bcrypt.hash(password, 10);
