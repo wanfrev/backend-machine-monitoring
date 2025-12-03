@@ -63,6 +63,54 @@ export const receiveData = async (req: Request, res: Response) => {
     console.error("Error saving IoT data to PostgreSQL:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
+<<<<<<< Updated upstream
+
+  // Mapear eventos específicos de la Pico a los tipos internos
+  let internalEvent: MachineEvent['type'];
+  if (event === "ENCENDIDO") internalEvent = "machine_on";
+  else if (event === "APAGADO") internalEvent = "machine_off";
+  else if (event === "MONEDA") internalEvent = "coin_inserted";
+  else if (
+    event === "coin_inserted" ||
+    event === "machine_on" ||
+    event === "machine_off" ||
+    event === "game_start" ||
+    event === "game_end" ||
+    event === "ping"
+  ) {
+    internalEvent = event as MachineEvent['type'];
+  } else {
+    internalEvent = "ping";
+  }
+
+  // Construir data combinando el campo "data" original y la "cantidad" de la Pico
+  const data: any = {
+    ...rawData,
+    cantidad,
+  };
+
+  // Update machine status
+  machine.lastPing = new Date();
+  if (internalEvent === "machine_on") machine.status = "active";
+  if (internalEvent === "machine_off") machine.status = "inactive";
+
+  // Create event record
+  const newEvent: MachineEvent = {
+    id: Math.random().toString(36).substr(2, 9),
+    machineId,
+    type: internalEvent,
+    timestamp: timestamp || new Date().toISOString(),
+    data,
+  };
+
+  db.events.push(newEvent);
+  db.commit();
+
+  console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
+
+  res.status(200).json({ status: "ok" });
+=======
+>>>>>>> Stashed changes
 };
 
 // Obtener todos los eventos IoT registrados
