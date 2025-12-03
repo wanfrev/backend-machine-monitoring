@@ -18,7 +18,7 @@ export const receiveData = async (req: Request, res: Response) => {
   } = req.body;
 
   const machineId = rawMachineId || maquina_id;
-  const event = rawEvent || evento;
+  const event = (rawEvent || evento) as string;
 
   if (!machineId || !event) {
     return res
@@ -66,10 +66,22 @@ export const receiveData = async (req: Request, res: Response) => {
 <<<<<<< Updated upstream
 
   // Mapear eventos específicos de la Pico a los tipos internos
-  let internalEvent: string = event;
+  let internalEvent: MachineEvent['type'];
   if (event === "ENCENDIDO") internalEvent = "machine_on";
-  if (event === "APAGADO") internalEvent = "machine_off";
-  if (event === "MONEDA") internalEvent = "coin_inserted";
+  else if (event === "APAGADO") internalEvent = "machine_off";
+  else if (event === "MONEDA") internalEvent = "coin_inserted";
+  else if (
+    event === "coin_inserted" ||
+    event === "machine_on" ||
+    event === "machine_off" ||
+    event === "game_start" ||
+    event === "game_end" ||
+    event === "ping"
+  ) {
+    internalEvent = event as MachineEvent['type'];
+  } else {
+    internalEvent = "ping";
+  }
 
   // Construir data combinando el campo "data" original y la "cantidad" de la Pico
   const data: any = {
