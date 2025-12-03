@@ -1,84 +1,97 @@
 import { Request, Response } from 'express';
-import { db } from '../utils/jsonDb';
+import { pool } from '../db';
 import { Machine } from '../models/types';
 
 const generateId = () => 'M-' + Math.random().toString(36).substr(2, 6).toUpperCase();
 
-export const getMachines = (req: Request, res: Response) => {
-  res.json(db.machines);
+  pool.query('SELECT * FROM machines')
+    .then(result => res.json(result.rows))
+    .catch(err => {
+      console.error('Error fetching machines:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
 
-export const getMachineById = (req: Request, res: Response) => {
-  const machine = db.machines.find(m => m.id === req.params.id);
-  if (!machine) return res.status(404).json({ message: 'Machine not found' });
-  res.json(machine);
+  const { id } = req.params;
+  pool.query('SELECT * FROM machines WHERE id = $1', [id])
+    .then(result => {
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Machine not found' });
+      res.json(result.rows[0]);
+    })
+    .catch(err => {
+      console.error('Error fetching machine:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
 
-export const createMachine = (req: Request, res: Response) => {
   const { name, location, id } = req.body;
   if (!name) return res.status(400).json({ message: 'Name is required' });
-
-  const newMachine: Machine = {
-    id: id || generateId(),
-    name,
-    status: 'inactive',
-    location: location || 'Unknown',
-    lastPing: new Date()
-  };
-
-  db.machines.push(newMachine);
-  db.commit();
-  res.status(201).json(newMachine);
+  const machineId = id || generateId();
+  pool.query(
+    'INSERT INTO machines (id, name, status, location, last_ping) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [machineId, name, 'inactive', location || 'Unknown', new Date()]
+  )
+    .then(result => res.status(201).json(result.rows[0]))
+    .catch(err => {
+      console.error('Error creating machine:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
 
-export const updateMachine = (req: Request, res: Response) => {
   const { id } = req.params;
-  const machine = db.machines.find(m => m.id === id);
-  if (!machine) return res.status(404).json({ message: 'Machine not found' });
-
   const { name, location, status } = req.body;
-  if (name) machine.name = name;
-  if (location) machine.location = location;
-  if (status) machine.status = status;
-
-  db.commit();
-  res.json(machine);
+  pool.query(
+    'UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status) WHERE id = $4 RETURNING *',
+    [name, location, status, id]
+  )
+    .then(result => {
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Machine not found' });
+      res.json(result.rows[0]);
+    })
+    .catch(err => {
+      console.error('Error updating machine:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
 
-export const deleteMachine = (req: Request, res: Response) => {
+export const deleteMachine = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const index = db.machines.findIndex(m => m.id === id);
-  if (index !== -1) {
-    db.machines.splice(index, 1);
-    db.commit();
+  try {
+    const result = await pool.query('DELETE FROM machines WHERE id = $1 RETURNING id', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Machine not found' });
+    }
     res.json({ message: 'Machine deleted' });
-  } else {
-    res.status(404).json({ message: 'Machine not found' });
+  } catch (err) {
+    console.error('Error deleting machine:', err);
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
-export const getMachineHistory = (req: Request, res: Response) => {
   const { id } = req.params;
-  const events = db.events.filter(e => e.machineId === id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  res.json(events);
+  pool.query(
+    'SELECT * FROM machine_events WHERE machine_id = $1 ORDER BY timestamp DESC',
+    [id]
+  )
+    .then(result => res.json(result.rows))
+    .catch(err => {
+      console.error('Error fetching machine history:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
 
-export const getMachineStats = (req: Request, res: Response) => {
   const { id } = req.params;
-  const events = db.events.filter(e => e.machineId === id);
-  
-  // Calculate stats
-  const totalIncome = events.filter(e => e.type === 'coin_inserted').reduce((sum, e) => sum + (e.data?.amount || 0), 0);
-  const totalScore = events.filter(e => e.type === 'game_end').reduce((sum, e) => sum + (e.data?.score || 0), 0);
-  const activeSessions = events.filter(e => e.type === 'game_start').length; // Simplified
-  
-  // Usage rate (mock calculation)
-  const usageRate = events.length > 0 ? 45.5 : 0;
-
-  res.json({
-    totalIncome,
-    totalScore,
-    activeSessions,
-    usageRate
-  });
+  pool.query('SELECT * FROM machine_events WHERE machine_id = $1', [id])
+    .then(result => {
+      const events = result.rows;
+      const totalIncome = events.filter(e => e.type === 'coin_inserted').reduce((sum, e) => sum + (e.data?.amount || 0), 0);
+      const totalScore = events.filter(e => e.type === 'game_end').reduce((sum, e) => sum + (e.data?.score || 0), 0);
+      const activeSessions = events.filter(e => e.type === 'game_start').length;
+      const usageRate = events.length > 0 ? 45.5 : 0;
+      res.json({ totalIncome, totalScore, activeSessions, usageRate });
+    })
+    .catch(err => {
+      console.error('Error fetching machine stats:', err);
+      res.status(500).json({ message: 'Server error' });
+    });
 };
