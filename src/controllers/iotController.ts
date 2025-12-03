@@ -1,9 +1,8 @@
 import { Request, Response } from "express";
 import { db } from "../utils/jsonDb";
 import { MachineEvent } from "../models/types";
-import { pool } from "../utils/db";
 
-export const receiveData = async (req: Request, res: Response) => {
+export const receiveData = (req: Request, res: Response) => {
   // Soportar tanto el formato original del backend
   // como el formato enviado por la Pico W.
   const {
@@ -26,44 +25,12 @@ export const receiveData = async (req: Request, res: Response) => {
       .json({ message: "Missing machineId/maquina_id or event/evento" });
   }
 
-  try {
-    // Verify machine exists in PostgreSQL
-    const machineResult = await pool.query(
-      "SELECT id FROM machines WHERE id = $1",
-      [machineId]
-    );
-
-    if (machineResult.rowCount === 0) {
-      console.warn(`Received data from unknown machine: ${machineId}`);
-      return res.status(404).json({ message: "Machine not found" });
-    }
-
-    // Mapear eventos específicos de la Pico a los tipos internos
-    let internalEvent: string = event;
-    if (event === "ENCENDIDO") internalEvent = "machine_on";
-    if (event === "APAGADO") internalEvent = "machine_off";
-    if (event === "MONEDA") internalEvent = "coin_inserted";
-
-    const amount = typeof cantidad === "number" ? cantidad : 0;
-
-    await pool.query(
-      `INSERT INTO machine_events (machine_id, event_type, amount, raw_event)
-       VALUES ($1, $2, $3, $4)`,
-      [machineId, internalEvent, amount, event]
-    );
-
-    console.log(`IoT Event: ${machineId} - ${internalEvent}`, {
-      rawData,
-      cantidad,
-      timestamp,
-    });
-
-    return res.status(200).json({ status: "ok" });
-  } catch (error) {
-    console.error("Error saving IoT data to PostgreSQL:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  // Verify machine exists
+  const machine = db.machines.find((m) => m.id === machineId);
+  if (!machine) {
+    console.warn(`Received data from unknown machine: ${machineId}`);
+    return res.status(404).json({ message: "Machine not found" });
   }
-<<<<<<< Updated upstream
 
   // Mapear eventos específicos de la Pico a los tipos internos
   let internalEvent: MachineEvent['type'];
@@ -109,8 +76,6 @@ export const receiveData = async (req: Request, res: Response) => {
   console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
 
   res.status(200).json({ status: "ok" });
-=======
->>>>>>> Stashed changes
 };
 
 // Obtener todos los eventos IoT registrados
