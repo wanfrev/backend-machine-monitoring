@@ -54,11 +54,11 @@ export const receiveData = async (req: Request, res: Response) => {
 
   // Unificar cantidad: si viene en rawData.cantidad, cantidad, o ninguna
   let cantidadFinal = cantidad;
-  if (rawData && typeof rawData.cantidad !== 'undefined') {
+  if (rawData && typeof rawData.cantidad !== "undefined") {
     cantidadFinal = rawData.cantidad;
   }
   const data: any = { ...rawData };
-  if (typeof cantidadFinal !== 'undefined') {
+  if (typeof cantidadFinal !== "undefined") {
     data.cantidad = cantidadFinal;
   }
 
@@ -83,13 +83,20 @@ export const receiveData = async (req: Request, res: Response) => {
     [machineId, internalEvent, timestamp || new Date().toISOString(), data]
   );
 
-  // Si es evento de moneda, insertar en coins
+  // Si es evento de moneda, insertar en coins (con manejo de errores y logs)
   if (internalEvent === "coin_inserted") {
     const eventId = eventResult.rows[0].id;
-    await pool.query(
-      "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
-      [machineId, eventId]
-    );
+    try {
+      await pool.query(
+        "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
+        [machineId, eventId]
+      );
+      console.log(
+        `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
+      );
+    } catch (err) {
+      console.error("Error insertando en coins:", err);
+    }
   }
 
   console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
