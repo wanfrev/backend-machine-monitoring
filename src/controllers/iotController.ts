@@ -52,7 +52,15 @@ export const receiveData = async (req: Request, res: Response) => {
     internalEvent = "ping";
   }
 
-  const data: any = { ...rawData, cantidad };
+  // Unificar cantidad: si viene en rawData.cantidad, cantidad, o ninguna
+  let cantidadFinal = cantidad;
+  if (rawData && typeof rawData.cantidad !== 'undefined') {
+    cantidadFinal = rawData.cantidad;
+  }
+  const data: any = { ...rawData };
+  if (typeof cantidadFinal !== 'undefined') {
+    data.cantidad = cantidadFinal;
+  }
 
   // Actualizar status y last_ping de la máquina
   await pool.query(
