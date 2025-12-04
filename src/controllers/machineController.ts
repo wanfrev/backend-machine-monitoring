@@ -14,8 +14,30 @@ import { Request, Response } from "express";
 import { pool } from "../db";
 import { Machine } from "../models/types";
 
-const generateId = () =>
-  "M-" + Math.random().toString(36).substr(2, 6).toUpperCase();
+// Genera un ID secuencial en base al tipo de máquina
+// Ej: "Boxeo" -> "Maquina_Boxeo_01", "Maquina_Boxeo_02", etc.
+async function generateSequentialId(name: string): Promise<string> {
+  // Inferir prefijo por nombre: asumimos que el nombre empieza por "Boxeo" o "Agilidad"
+  const isBoxeo = name.startsWith("Boxeo");
+  const tipo = isBoxeo ? "Boxeo" : "Agilidad";
+  const prefix = isBoxeo ? "Maquina_Boxeo_" : "Maquina_Agilidad_";
+
+  const result = await pool.query("SELECT id FROM machines WHERE id LIKE $1", [
+    prefix + "%",
+  ]);
+
+  let maxNum = 0;
+  for (const row of result.rows as { id: string }[]) {
+    const match = row.id.match(/_(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+
+  const next = (maxNum + 1).toString().padStart(2, "0");
+  return `${prefix}${next}`;
+}
 
 export const getMachines = (req: Request, res: Response) => {
   pool
@@ -42,20 +64,23 @@ export const getMachineById = (req: Request, res: Response) => {
     });
 };
 
-export const createMachine = (req: Request, res: Response) => {
+export const createMachine = async (req: Request, res: Response) => {
   const { name, location, id } = req.body;
   if (!name) return res.status(400).json({ message: "Name is required" });
-  const machineId = id || generateId();
-  pool
-    .query(
+
+  try {
+    const machineId: string = id || (await generateSequentialId(name));
+
+    const result = await pool.query(
       "INSERT INTO machines (id, name, status, location, last_ping) VALUES ($1, $2, $3, $4, $5) RETURNING *",
       [machineId, name, "inactive", location || "Unknown", new Date()]
-    )
-    .then((result) => res.status(201).json(result.rows[0]))
-    .catch((err) => {
-      console.error("Error creating machine:", err);
-      res.status(500).json({ message: "Server error" });
-    });
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Error creating machine:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 export const updateMachine = (req: Request, res: Response) => {
