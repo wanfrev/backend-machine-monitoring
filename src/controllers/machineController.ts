@@ -1,3 +1,15 @@
+// Devuelve el total de monedas agrupado por máquina
+export const getCoinsByMachine = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT machine_id, COUNT(*) AS total_coins FROM coins GROUP BY machine_id`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching coins by machine:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 import { Request, Response } from "express";
 import { pool } from "../db";
 import { Machine } from "../models/types";
