@@ -1,5 +1,5 @@
 // Devuelve el total de monedas agrupado por máquina
-export const getCoinsByMachine = async (req, res) => {
+export const getCoinsByMachine = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT machine_id, COUNT(*) AS total_coins FROM coins GROUP BY machine_id`
