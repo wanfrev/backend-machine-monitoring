@@ -69,10 +69,20 @@ export const receiveData = async (req: Request, res: Response) => {
   );
 
   // Insertar evento
-  await pool.query(
-    "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4)",
+  // Insertar evento y obtener el id
+  const eventResult = await pool.query(
+    "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
     [machineId, internalEvent, timestamp || new Date().toISOString(), data]
   );
+
+  // Si es evento de moneda, insertar en coins
+  if (internalEvent === "coin_inserted") {
+    const eventId = eventResult.rows[0].id;
+    await pool.query(
+      "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
+      [machineId, eventId]
+    );
+  }
 
   console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
   res.status(200).json({ status: "ok" });
