@@ -1,26 +1,54 @@
-// Actualizar usuario (sin cambiar contraseña)
+// Actualizar usuario (posiblemente cambiando contraseña si se envía)
 export const updateUser = async (req: Request, res: Response) => {
   const { id } = req.params;
   // Aceptar tanto camelCase como snake_case desde el frontend
-  const { name, shift } = req.body;
+  const { name, shift, password } = req.body;
   const documentId = req.body.documentId ?? req.body.document_id ?? null;
   const jobRole = req.body.jobRole ?? req.body.job_role ?? null;
   const assignedMachineId =
     req.body.assignedMachineId ?? req.body.assigned_machine_id ?? null;
   const role = req.body.role ?? "employee";
   try {
-    const result = await pool.query(
-      `UPDATE users SET
-        name = $1,
-        shift = $2,
-        document_id = $3,
-        job_role = $4,
-        assigned_machine_id = $5,
-        role = $6
-      WHERE id = $7
-      RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId"`,
-      [name, shift, documentId, jobRole, assignedMachineId, role, id]
-    );
+    let result;
+
+    if (password) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      result = await pool.query(
+        `UPDATE users SET
+          password_hash = $1,
+          name = $2,
+          shift = $3,
+          document_id = $4,
+          job_role = $5,
+          assigned_machine_id = $6,
+          role = $7
+        WHERE id = $8
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId"`,
+        [
+          passwordHash,
+          name,
+          shift,
+          documentId,
+          jobRole,
+          assignedMachineId,
+          role,
+          id,
+        ]
+      );
+    } else {
+      result = await pool.query(
+        `UPDATE users SET
+          name = $1,
+          shift = $2,
+          document_id = $3,
+          job_role = $4,
+          assigned_machine_id = $5,
+          role = $6
+        WHERE id = $7
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId"`,
+        [name, shift, documentId, jobRole, assignedMachineId, role, id]
+      );
+    }
     if (result.rowCount === 0) {
       return res.status(404).json({ message: "User not found" });
     }
