@@ -9,7 +9,18 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export const getUsers = (req: Request, res: Response) => {
   pool
-    .query("SELECT id, username, role, name, shift FROM users")
+    .query(
+      `SELECT
+        id,
+        username,
+        role,
+        name,
+        shift,
+        document_id AS "documentId",
+        job_role AS "jobRole",
+        assigned_machine_id AS "assignedMachineId"
+      FROM users`
+    )
     .then((result) => res.json(result.rows))
     .catch((err) => {
       console.error("Error fetching users:", err);
@@ -18,11 +29,23 @@ export const getUsers = (req: Request, res: Response) => {
 };
 
 export const createUser = async (req: Request, res: Response) => {
-  const { username, password, name, role, shift } = req.body;
+  const {
+    username,
+    password,
+    name,
+    role,
+    shift,
+    documentId,
+    jobRole,
+    assignedMachineId,
+  } = req.body;
   if (!username || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
   try {
+    if (!["admin", "employee"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
     const exists = await pool.query("SELECT 1 FROM users WHERE username = $1", [
       username,
     ]);
@@ -31,8 +54,35 @@ export const createUser = async (req: Request, res: Response) => {
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      "INSERT INTO users (username, password_hash, role, name, shift) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role, name, shift",
-      [username, passwordHash, role, name || username, shift]
+      `INSERT INTO users (
+        username,
+        password_hash,
+        role,
+        name,
+        shift,
+        document_id,
+        job_role,
+        assigned_machine_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING
+        id,
+        username,
+        role,
+        name,
+        shift,
+        document_id AS "documentId",
+        job_role AS "jobRole",
+        assigned_machine_id AS "assignedMachineId"`,
+      [
+        username,
+        passwordHash,
+        role,
+        name || username,
+        shift,
+        documentId || null,
+        jobRole || null,
+        assignedMachineId || null,
+      ]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

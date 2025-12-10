@@ -10,7 +10,18 @@ export const login = async (req: Request, res: Response) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, username, password_hash, role, name FROM users WHERE username = $1",
+      `SELECT
+        id,
+        username,
+        password_hash,
+        role,
+        name,
+        shift,
+        document_id,
+        job_role,
+        assigned_machine_id
+      FROM users
+      WHERE username = $1`,
       [username]
     );
     const user = result.rows[0];
@@ -33,6 +44,10 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         role: user.role,
         name: user.name,
+        shift: user.shift,
+        documentId: user.document_id,
+        jobRole: user.job_role,
+        assignedMachineId: user.assigned_machine_id,
       },
     });
   } catch (err) {
