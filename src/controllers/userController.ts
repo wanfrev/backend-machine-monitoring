@@ -29,6 +29,8 @@ export const getUsers = (req: Request, res: Response) => {
 };
 
 export const createUser = async (req: Request, res: Response) => {
+  // Log de depuración para ver exactamente qué llega desde el frontend
+  console.log("[createUser] Incoming body:", req.body);
   // Aceptar tanto camelCase como snake_case desde el frontend
   const { username, password, name, role, shift } = req.body;
   const documentId = req.body.documentId ?? req.body.document_id ?? null;
