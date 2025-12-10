@@ -29,16 +29,12 @@ export const getUsers = (req: Request, res: Response) => {
 };
 
 export const createUser = async (req: Request, res: Response) => {
-  const {
-    username,
-    password,
-    name,
-    role,
-    shift,
-    documentId,
-    jobRole,
-    assignedMachineId,
-  } = req.body;
+  // Aceptar tanto camelCase como snake_case desde el frontend
+  const { username, password, name, role, shift } = req.body;
+  const documentId = req.body.documentId ?? req.body.document_id ?? null;
+  const jobRole = req.body.jobRole ?? req.body.job_role ?? null;
+  const assignedMachineId =
+    req.body.assignedMachineId ?? req.body.assigned_machine_id ?? null;
   if (!username || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
