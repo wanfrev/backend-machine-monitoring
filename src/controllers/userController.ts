@@ -70,32 +70,21 @@ export const createUser = async (req: Request, res: Response) => {
         role,
         name,
         shift,
-        document_id,
-        job_role,
-        assigned_machine_id`,
+        document_id AS "documentId",
+        job_role AS "jobRole",
+        assigned_machine_id AS "assignedMachineId"`,
       [
         username,
         passwordHash,
         role,
         name || username,
-        shift || null,
+        shift,
         documentId || null,
         jobRole || null,
         assignedMachineId || null,
       ]
     );
-    // Map snake_case to camelCase for frontend compatibility
-    const user = result.rows[0];
-    res.status(201).json({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      name: user.name,
-      shift: user.shift,
-      documentId: user.document_id,
-      jobRole: user.job_role,
-      assignedMachineId: user.assigned_machine_id,
-    });
+    res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Error creating user:", err);
     res.status(500).json({ message: "Server error" });
