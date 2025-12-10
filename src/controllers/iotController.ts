@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { pool } from "../db";
 import { MachineEvent } from "../models/types";
 
+const HEARTBEAT_TIMEOUT_MS = 1 * 60 * 1000; // 1 minuto
+
 export const receiveData = async (req: Request, res: Response) => {
   const {
     machineId: rawMachineId,
@@ -125,7 +127,7 @@ export const getStatus = async (req: Request, res: Response) => {
       const lastPing = machine.last_ping
         ? new Date(machine.last_ping).getTime()
         : 0;
-      const connected = lastPing && now - lastPing < 2 * 60 * 1000;
+      const connected = lastPing && now - lastPing < HEARTBEAT_TIMEOUT_MS;
       return {
         id: machine.id,
         name: machine.name,

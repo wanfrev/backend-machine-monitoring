@@ -15,7 +15,7 @@ pool
   );
 
 // Cron simple en memoria: marca máquinas como inactivas si no han enviado PING reciente
-const HEARTBEAT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutos
+const HEARTBEAT_TIMEOUT_MS = 1 * 60 * 1000; // 1 minuto
 const HEARTBEAT_CHECK_INTERVAL_MS = 60 * 1000; // cada 1 minuto
 
 async function markStaleMachinesInactive() {
