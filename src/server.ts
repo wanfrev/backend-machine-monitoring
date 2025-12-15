@@ -29,6 +29,17 @@ async function markStaleMachinesInactive() {
       if (!row.last_ping) continue;
       const diff = now.getTime() - new Date(row.last_ping).getTime();
       if (diff > HEARTBEAT_TIMEOUT_MS) {
+        // 1. Insertar evento machine_off en machine_events
+        await pool.query(
+          "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4)",
+          [
+            row.id,
+            "machine_off",
+            now.toISOString(),
+            { auto: true, reason: "timeout" },
+          ]
+        );
+        // 2. Actualizar estado de la máquina
         await pool.query(
           "UPDATE machines SET status = 'inactive' WHERE id = $1",
           [row.id]
@@ -36,7 +47,7 @@ async function markStaleMachinesInactive() {
         console.log(
           `⚠️ Máquina ${
             row.id
-          } marcada como INACTIVA por falta de latido (${Math.round(
+          } marcada como INACTIVA y evento machine_off registrado por falta de latido (${Math.round(
             diff / 1000
           )}s sin PING).`
         );
