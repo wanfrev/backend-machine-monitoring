@@ -66,22 +66,14 @@ async function generateSequentialId(name: string): Promise<string> {
   return `${prefix}${next}`;
 }
 
-export const getMachines = async (req: Request, res: Response) => {
-  try {
-    // Si el usuario es supervisor y tiene zona, filtrar por location que comience con zona
-    const user = req.user as any; // Asegúrate de que req.user esté poblado por el middleware de autenticación
-    let query = "SELECT * FROM machines";
-    let params: any[] = [];
-    if (user && user.role === "supervisor" && user.zone) {
-      query += " WHERE location ILIKE $1";
-      params.push(user.zone + "%");
-    }
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error fetching machines:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+export const getMachines = (req: Request, res: Response) => {
+  pool
+    .query("SELECT * FROM machines")
+    .then((result) => res.json(result.rows))
+    .catch((err) => {
+      console.error("Error fetching machines:", err);
+      res.status(500).json({ message: "Server error" });
+    });
 };
 
 export const getMachineById = (req: Request, res: Response) => {
