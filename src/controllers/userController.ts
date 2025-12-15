@@ -102,7 +102,6 @@ export const createUser = async (req: Request, res: Response) => {
   const jobRole = req.body.jobRole ?? req.body.job_role ?? null;
   const assignedMachineId =
     req.body.assignedMachineId ?? req.body.assigned_machine_id ?? null;
-  const zone = req.body.zone ?? null;
   if (!username || !password || !role) {
     return res.status(400).json({ message: "Missing required fields" });
   }
@@ -126,9 +125,8 @@ export const createUser = async (req: Request, res: Response) => {
         shift,
         document_id,
         job_role,
-        assigned_machine_id,
-        zone
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        assigned_machine_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING
         id,
         username,
@@ -137,8 +135,7 @@ export const createUser = async (req: Request, res: Response) => {
         shift,
         document_id AS "documentId",
         job_role AS "jobRole",
-        assigned_machine_id AS "assignedMachineId",
-        zone`,
+        assigned_machine_id AS "assignedMachineId"`,
       [
         username,
         passwordHash,
@@ -148,7 +145,6 @@ export const createUser = async (req: Request, res: Response) => {
         documentId || null,
         jobRole || null,
         assignedMachineId || null,
-        zone,
       ]
     );
     res.status(201).json(result.rows[0]);
