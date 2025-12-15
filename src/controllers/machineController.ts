@@ -41,6 +41,9 @@ import { Request, Response } from "express";
 import { pool } from "../db";
 import { Machine } from "../models/types";
 
+// Exportación explícita para evitar error de importación
+export { getMachineDailyIncome };
+
 // Genera un ID secuencial en base al tipo de máquina
 // Ej: "Boxeo" -> "Maquina_Boxeo_01", "Maquina_Boxeo_02", etc.
 async function generateSequentialId(name: string): Promise<string> {
