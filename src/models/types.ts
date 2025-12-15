@@ -7,7 +7,8 @@ export interface User {
   shift?: string; // Turno de trabajo (ej. Diurno, Nocturno)
   documentId?: string; // Cédula / ID de empleado
   jobRole?: string; // Rol visible (Operador, Supervisor de turno, etc.)
-  assignedMachineId?: string; // Máquina asignada
+  // Lista de IDs de máquinas asignadas (relación muchos-a-muchos)
+  assignedMachineIds?: string[];
 }
 
 export interface Machine {

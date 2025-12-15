@@ -11,17 +11,22 @@ export const login = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT
-        id,
-        username,
-        password_hash,
-        role,
-        name,
-        shift,
-        document_id,
-        job_role,
-        assigned_machine_id
-      FROM users
-      WHERE username = $1`,
+        u.id,
+        u.username,
+        u.password_hash,
+        u.role,
+        u.name,
+        u.shift,
+        u.document_id,
+        u.job_role,
+        COALESCE(
+          JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
+          '[]'
+        ) AS "assignedMachineIds"
+      FROM users u
+      LEFT JOIN user_machines um ON um.user_id = u.id
+      WHERE u.username = $1
+      GROUP BY u.id, u.username, u.password_hash, u.role, u.name, u.shift, u.document_id, u.job_role`,
       [username]
     );
     const user = result.rows[0];
@@ -37,6 +42,11 @@ export const login = async (req: Request, res: Response) => {
       SECRET_KEY,
       { expiresIn: "365d" }
     );
+
+    const assignedMachineIds: string[] =
+      (user.assignedMachineIds as string[]) || [];
+    const primaryMachineId = assignedMachineIds[0] ?? null;
+
     res.json({
       token,
       user: {
@@ -47,7 +57,8 @@ export const login = async (req: Request, res: Response) => {
         shift: user.shift,
         documentId: user.document_id,
         jobRole: user.job_role,
-        assignedMachineId: user.assigned_machine_id,
+        assignedMachineIds,
+        assignedMachineId: primaryMachineId,
       },
     });
   } catch (err) {
