@@ -19,7 +19,8 @@ export const login = async (req: Request, res: Response) => {
         shift,
         document_id,
         job_role,
-        assigned_machine_id
+        assigned_machine_id,
+        zone
       FROM users
       WHERE username = $1`,
       [username]
@@ -48,6 +49,7 @@ export const login = async (req: Request, res: Response) => {
         documentId: user.document_id,
         jobRole: user.job_role,
         assignedMachineId: user.assigned_machine_id,
+        zone: user.zone,
       },
     });
   } catch (err) {

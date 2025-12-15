@@ -7,6 +7,7 @@ export const updateUser = async (req: Request, res: Response) => {
   const jobRole = req.body.jobRole ?? req.body.job_role ?? null;
   const assignedMachineId =
     req.body.assignedMachineId ?? req.body.assigned_machine_id ?? null;
+  const zone = req.body.zone ?? req.body.locationPrefix ?? null;
   const role = req.body.role ?? "employee";
   try {
     let result;
@@ -21,9 +22,10 @@ export const updateUser = async (req: Request, res: Response) => {
           document_id = $4,
           job_role = $5,
           assigned_machine_id = $6,
-          role = $7
-        WHERE id = $8
-        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId"`,
+          role = $7,
+          zone = $8
+        WHERE id = $9
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId", zone`,
         [
           passwordHash,
           name,
@@ -32,6 +34,7 @@ export const updateUser = async (req: Request, res: Response) => {
           jobRole,
           assignedMachineId,
           role,
+          zone,
           id,
         ]
       );
@@ -43,10 +46,11 @@ export const updateUser = async (req: Request, res: Response) => {
           document_id = $3,
           job_role = $4,
           assigned_machine_id = $5,
-          role = $6
-        WHERE id = $7
-        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId"`,
-        [name, shift, documentId, jobRole, assignedMachineId, role, id]
+          role = $6,
+          zone = $7
+        WHERE id = $8
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", assigned_machine_id AS "assignedMachineId", zone`,
+        [name, shift, documentId, jobRole, assignedMachineId, role, zone, id]
       );
     }
     if (result.rowCount === 0) {
@@ -78,7 +82,8 @@ export const getUsers = (req: Request, res: Response) => {
         shift,
         document_id AS "documentId",
         job_role AS "jobRole",
-        assigned_machine_id AS "assignedMachineId"
+        assigned_machine_id AS "assignedMachineId",
+        zone
       FROM users`
     )
     .then((result) => res.json(result.rows))
