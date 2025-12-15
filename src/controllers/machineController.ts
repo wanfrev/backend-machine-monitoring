@@ -1,3 +1,30 @@
+// Ingresos diarios por máquina (para la gráfica de resumen)
+export const getMachineDailyIncome = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { startDate, endDate } = req.query;
+  try {
+    // Usar machine_events para contar monedas por día
+    const result = await pool.query(
+      `SELECT 
+        DATE(timestamp) as date, 
+        COALESCE(SUM((data->>'cantidad')::int), 0) as income
+      FROM machine_events
+      WHERE machine_id = $1
+        AND type = 'coin_inserted'
+        AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
+        AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
+      GROUP BY DATE(timestamp)
+      ORDER BY DATE(timestamp)`,
+      [id, startDate || null, endDate || null]
+    );
+    res.json(
+      result.rows.map((r: any) => ({ date: r.date, income: Number(r.income) }))
+    );
+  } catch (err) {
+    console.error("Error fetching daily income for machine:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 // Devuelve el total de monedas agrupado por máquina
 export const getCoinsByMachine = async (req: Request, res: Response) => {
   try {
