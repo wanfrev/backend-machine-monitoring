@@ -6,6 +6,7 @@ import {
   updateMachine,
   deleteMachine,
   getMachineHistory,
+  getMachinePowerLogs,
   getMachineStats,
   getTotalCoins,
   getCoinsByMachine,
@@ -22,6 +23,7 @@ router.get("/coins/total", getTotalCoins);
 router.get("/coins/by-machine", getCoinsByMachine);
 router.get("/:id", getMachineById);
 router.get("/:id/history", getMachineHistory);
+router.get("/:id/power-logs", getMachinePowerLogs);
 
 router.get("/:id/income/daily", getMachineDailyIncome);
 router.get("/:id/stats", getMachineStats);

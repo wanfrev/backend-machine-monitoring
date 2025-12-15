@@ -160,6 +160,60 @@ export const getMachineHistory = (req: Request, res: Response) => {
     });
 };
 
+// Devuelve los eventos de encendido/apagado con duración estimada por sesión
+export const getMachinePowerLogs = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { startDate, endDate } = req.query;
+  try {
+    const result = await pool.query(
+      `SELECT type, timestamp
+       FROM machine_events
+       WHERE machine_id = $1
+         AND type IN ('machine_on', 'machine_off')
+         AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
+         AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
+       ORDER BY timestamp ASC`,
+      [id, startDate || null, endDate || null]
+    );
+
+    type RawRow = { type: string; timestamp: Date };
+    type Log = {
+      event: "Encendido" | "Apagado";
+      ts: string;
+      dur: number | null;
+    };
+
+    const rows = result.rows as RawRow[];
+    const logs: Log[] = [];
+    let lastOnIndex: number | null = null;
+
+    for (const row of rows) {
+      const tsIso = new Date(row.timestamp).toISOString();
+      if (row.type === "machine_on") {
+        logs.push({ event: "Encendido", ts: tsIso, dur: null });
+        lastOnIndex = logs.length - 1;
+      } else if (row.type === "machine_off") {
+        // Evento de apagado
+        if (lastOnIndex !== null) {
+          const onTs = new Date(logs[lastOnIndex].ts).getTime();
+          const offTs = new Date(tsIso).getTime();
+          if (offTs > onTs) {
+            const minutes = Math.round((offTs - onTs) / (1000 * 60));
+            logs[lastOnIndex].dur = minutes;
+          }
+          lastOnIndex = null;
+        }
+        logs.push({ event: "Apagado", ts: tsIso, dur: null });
+      }
+    }
+
+    res.json(logs);
+  } catch (err) {
+    console.error("Error fetching machine power logs:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getMachineStats = (req: Request, res: Response) => {
   const { id } = req.params;
   pool
