@@ -9,6 +9,7 @@ import {
   getMachineStats,
   getTotalCoins,
   getCoinsByMachine,
+  getMachineDailyIncome,
 } from "../controllers/machineController";
 import { authenticateToken, requireAdmin } from "../middleware/authMiddleware";
 
@@ -22,7 +23,7 @@ router.get("/coins/by-machine", getCoinsByMachine);
 router.get("/:id", getMachineById);
 router.get("/:id/history", getMachineHistory);
 
-router.get("/:id/income/daily", requireAdmin, getMachineDailyIncome);
+router.get("/:id/income/daily", getMachineDailyIncome);
 router.get("/:id/stats", getMachineStats);
 
 // Only admin can manage machines
