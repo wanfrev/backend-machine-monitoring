@@ -3,18 +3,19 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
-    // Usar machine_events para contar monedas por día
+    // Usar machine_events para contar monedas por día en zona horaria local
+    // Ajustar aquí la zona horaria a la de tus máquinas/negocio
     const result = await pool.query(
       `SELECT 
-        DATE(timestamp) as date, 
-        COALESCE(SUM((data->>'cantidad')::int), 0) as income
+        DATE(timestamp AT TIME ZONE 'America/Caracas') AS date,
+        COALESCE(SUM((data->>'cantidad')::int), 0) AS income
       FROM machine_events
       WHERE machine_id = $1
         AND type = 'coin_inserted'
-        AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
-        AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
-      GROUP BY DATE(timestamp)
-      ORDER BY DATE(timestamp)`,
+        AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
+        AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
+      GROUP BY DATE(timestamp AT TIME ZONE 'America/Caracas')
+      ORDER BY DATE(timestamp AT TIME ZONE 'America/Caracas')`,
       [id, startDate || null, endDate || null]
     );
     res.json(
@@ -155,8 +156,8 @@ export const getMachineHistory = async (req: Request, res: Response) => {
       `SELECT *
        FROM machine_events
        WHERE machine_id = $1
-         AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
-         AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
+         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
+         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
        ORDER BY timestamp DESC`,
       [id, startDate || null, endDate || null]
     );
