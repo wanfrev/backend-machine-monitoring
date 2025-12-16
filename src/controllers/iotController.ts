@@ -64,18 +64,22 @@ export const receiveData = async (req: Request, res: Response) => {
     data.cantidad = cantidadFinal;
   }
 
-  // Actualizar status y last_ping de la máquina
+  // Actualizar status y last_ping de la máquina.
+  // Regla:
+  // - ENCENDIDO o ping => status = 'active'
+  // - APAGADO         => status = 'inactive'
+  // - Otros eventos   => mantienen el status actual
+  const now = new Date();
+  let newStatus = machineResult.rows[0].status as string;
+  if (internalEvent === "machine_on" || internalEvent === "ping") {
+    newStatus = "active";
+  } else if (internalEvent === "machine_off") {
+    newStatus = "inactive";
+  }
+
   await pool.query(
     "UPDATE machines SET last_ping = $1, status = $2 WHERE id = $3",
-    [
-      new Date(),
-      internalEvent === "machine_on"
-        ? "active"
-        : internalEvent === "machine_off"
-        ? "inactive"
-        : machineResult.rows[0].status,
-      machineId,
-    ]
+    [now, newStatus, machineId]
   );
 
   // Insertar evento
