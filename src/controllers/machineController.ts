@@ -146,18 +146,26 @@ export const deleteMachine = async (req: Request, res: Response) => {
   }
 };
 
-export const getMachineHistory = (req: Request, res: Response) => {
+export const getMachineHistory = async (req: Request, res: Response) => {
   const { id } = req.params;
-  pool
-    .query(
-      "SELECT * FROM machine_events WHERE machine_id = $1 ORDER BY timestamp DESC",
-      [id]
-    )
-    .then((result) => res.json(result.rows))
-    .catch((err) => {
-      console.error("Error fetching machine history:", err);
-      res.status(500).json({ message: "Server error" });
-    });
+  const { startDate, endDate } = req.query;
+
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM machine_events
+       WHERE machine_id = $1
+         AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
+         AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
+       ORDER BY timestamp DESC`,
+      [id, startDate || null, endDate || null]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching machine history:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 // Devuelve los eventos de encendido/apagado con duración estimada por sesión
