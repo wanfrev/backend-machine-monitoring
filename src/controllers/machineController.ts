@@ -3,15 +3,15 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
-    // Usar machine_events para contar monedas por día en zona horaria local
-    // Ajustar aquí la zona horaria a la de tus máquinas/negocio
+    // Usar la tabla coins para contar monedas por día en zona horaria local.
+    // Cada registro en coins representa una moneda insertada.
+    // Ajustar aquí la zona horaria a la de tus máquinas/negocio.
     const result = await pool.query(
       `SELECT 
         DATE(timestamp AT TIME ZONE 'America/Caracas') AS date,
-        COALESCE(SUM((data->>'cantidad')::int), 0) AS income
-      FROM machine_events
+        COUNT(*) AS income
+      FROM coins
       WHERE machine_id = $1
-        AND type = 'coin_inserted'
         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
       GROUP BY DATE(timestamp AT TIME ZONE 'America/Caracas')
