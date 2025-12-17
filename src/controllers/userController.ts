@@ -57,7 +57,7 @@ export const createUser = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Missing required fields" });
   }
   try {
-    if (!["admin", "employee"].includes(role)) {
+    if (!["admin", "employee", "operator"].includes(role)) {
       return res.status(400).json({ message: "Invalid role" });
     }
     const exists = await pool.query("SELECT 1 FROM users WHERE username = $1", [
