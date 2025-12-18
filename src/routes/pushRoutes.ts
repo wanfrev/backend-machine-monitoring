@@ -27,4 +27,23 @@ router.get("/vapid-public", (req, res) => {
   res.json({ publicKey: getVapidPublicKey() });
 });
 
+// Endpoint de prueba para enviar una notificación a todos los suscriptores
+router.post("/send-test", async (req, res) => {
+  try {
+    const { sendNotificationToAll } = await import(
+      "../utils/pushSubscriptions"
+    );
+    const payload = req.body || {
+      title: "Notificación de prueba",
+      body: "Prueba push desde el backend",
+      data: { test: true, ts: new Date().toISOString() },
+    };
+    await sendNotificationToAll(payload);
+    res.json({ status: "ok" });
+  } catch (e) {
+    console.error("Error sending test push:", e);
+    res.status(500).json({ status: "error", message: String(e) });
+  }
+});
+
 export default router;
