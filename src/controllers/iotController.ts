@@ -121,6 +121,26 @@ export const receiveData = async (req: Request, res: Response) => {
           socketErr
         );
       }
+      // Enviar notificación push a suscriptores (si VAPID configurado)
+      try {
+        const { sendNotificationToAll } = await import(
+          "../utils/pushSubscriptions"
+        );
+        await sendNotificationToAll({
+          title: "Moneda ingresada",
+          body: `${machineRow.name} ${
+            machineRow.location ? `• ${machineRow.location}` : ""
+          }`.trim(),
+          data: {
+            machineId,
+            eventId,
+            amount: data.cantidad ?? 1,
+            timestamp: timestamp || new Date().toISOString(),
+          },
+        });
+      } catch (pushErr) {
+        console.error("Error enviando notificación push:", pushErr);
+      }
     } catch (err) {
       console.error("Error insertando en coins:", err);
     }
