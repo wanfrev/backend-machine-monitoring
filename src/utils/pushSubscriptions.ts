@@ -44,10 +44,6 @@ export function getSubscriptions() {
 export async function sendNotificationToAll(payload: any) {
   const subs = getSubscriptions();
   if (!subs.length) return;
-  console.log(
-    `Sending push to ${subs.length} subscription(s). Payload:`,
-    payload
-  );
   const vapidPublic = process.env.VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
   const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
