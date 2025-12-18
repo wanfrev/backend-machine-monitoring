@@ -1,6 +1,8 @@
 import app from "./app";
 import dotenv from "dotenv";
 import { pool } from "./db";
+import http from "http";
+import { Server as SocketIOServer } from "socket.io";
 
 dotenv.config();
 
@@ -60,6 +62,21 @@ async function markStaleMachinesInactive() {
 
 setInterval(markStaleMachinesInactive, HEARTBEAT_CHECK_INTERVAL_MS);
 
-app.listen(PORT, () => {
+// Crear servidor HTTP y Socket.IO para notificaciones en tiempo real
+const httpServer = http.createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin:
+      process.env.FRONTEND_ORIGIN || process.env.VUE_APP_FRONTEND_URL || "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+// Hacer disponible io dentro de los controladores vía req.app.get("io")
+app.set("io", io);
+
+httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

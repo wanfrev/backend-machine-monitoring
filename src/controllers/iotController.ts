@@ -70,7 +70,8 @@ export const receiveData = async (req: Request, res: Response) => {
   // - APAGADO         => status = 'inactive'
   // - Otros eventos   => mantienen el status actual
   const now = new Date();
-  let newStatus = machineResult.rows[0].status as string;
+  const machineRow = machineResult.rows[0];
+  let newStatus = machineRow.status as string;
   if (internalEvent === "machine_on" || internalEvent === "ping") {
     newStatus = "active";
   } else if (internalEvent === "machine_off") {
@@ -100,6 +101,26 @@ export const receiveData = async (req: Request, res: Response) => {
       console.log(
         `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
       );
+
+      // Notificación en tiempo real vía Socket.IO (si está configurado)
+      try {
+        const io = req.app.get("io");
+        if (io) {
+          io.emit("coin_inserted", {
+            machineId,
+            machineName: machineRow.name,
+            location: machineRow.location,
+            eventId,
+            amount: data.cantidad ?? 1,
+            timestamp: timestamp || new Date().toISOString(),
+          });
+        }
+      } catch (socketErr) {
+        console.error(
+          "Error emitiendo evento coin_inserted por Socket.IO:",
+          socketErr
+        );
+      }
     } catch (err) {
       console.error("Error insertando en coins:", err);
     }
