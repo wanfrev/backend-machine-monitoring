@@ -46,15 +46,4 @@ router.post("/send-test", async (req, res) => {
   }
 });
 
-// Endpoint que recibe logs desde el Service Worker (solo para depuración)
-router.post("/log", (req, res) => {
-  try {
-    console.log("[SW LOG]", req.ip || "-", req.body);
-    res.json({ status: "ok" });
-  } catch (e) {
-    console.error("Error handling SW log:", e);
-    res.status(500).json({ status: "error" });
-  }
-});
-
 export default router;
