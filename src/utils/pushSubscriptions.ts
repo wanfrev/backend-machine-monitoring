@@ -43,12 +43,22 @@ export function getSubscriptions() {
 
 export async function sendNotificationToAll(payload: any) {
   const subs = getSubscriptions();
-  console.log('[pushSubscriptions] sendNotificationToAll called. subscriptions:', subs.length);
+  console.log(
+    "[pushSubscriptions] sendNotificationToAll called. subscriptions:",
+    subs.length
+  );
   if (!subs.length) return;
   const vapidPublic = process.env.VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
   const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
-  console.log('[pushSubscriptions] VAPID_PUBLIC_KEY present:', !!vapidPublic, 'VAPID_PRIVATE_KEY present:', !!vapidPrivate, 'VAPID_SUBJECT:', subject);
+  console.log(
+    "[pushSubscriptions] VAPID_PUBLIC_KEY present:",
+    !!vapidPublic,
+    "VAPID_PRIVATE_KEY present:",
+    !!vapidPrivate,
+    "VAPID_SUBJECT:",
+    subject
+  );
   if (!vapidPublic || !vapidPrivate) {
     console.warn("VAPID keys not set; skipping push notifications");
     return;
@@ -62,14 +72,18 @@ export async function sendNotificationToAll(payload: any) {
 
   const promises = subs.map((s) => {
     try {
+      console.log('[pushSubscriptions] sending push to', s.endpoint);
       return webpush
         .sendNotification(s, JSON.stringify(payload))
+        .then(() => {
+          console.log('[pushSubscriptions] push sent to', s.endpoint);
+        })
         .catch((err: any) => {
+          console.error('[pushSubscriptions] error sending push to', s.endpoint, err && err.body ? err.body : err);
           // If subscription is no longer valid, remove it
           if (err?.statusCode === 410 || err?.statusCode === 404) {
+            console.log('[pushSubscriptions] removing invalid subscription', s.endpoint);
             removeSubscription(s.endpoint);
-          } else {
-            console.error("Error sending push to", s.endpoint, err);
           }
         });
     } catch (err: any) {
