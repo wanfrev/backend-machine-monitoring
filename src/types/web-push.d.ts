@@ -1,1 +1,1 @@
-declare module 'web-push';
+declare module "web-push";
