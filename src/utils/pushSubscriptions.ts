@@ -62,7 +62,7 @@ export async function sendNotificationToAll(payload: any) {
     try {
       return webpush
         .sendNotification(s, JSON.stringify(payload))
-        .catch((err) => {
+        .catch((err: any) => {
           // If subscription is no longer valid, remove it
           if (err?.statusCode === 410 || err?.statusCode === 404) {
             removeSubscription(s.endpoint);
@@ -70,7 +70,7 @@ export async function sendNotificationToAll(payload: any) {
             console.error("Error sending push to", s.endpoint, err);
           }
         });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error sending push (sync):", err);
       return Promise.resolve();
     }
