@@ -163,6 +163,31 @@ export const getEvents = async (req: Request, res: Response) => {
   }
 };
 
+// Obtener el último evento coin_inserted (útil para Service Worker fallback)
+export const getLatestEvent = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      "SELECT me.*, m.name as machine_name, m.location as machine_location FROM machine_events me JOIN machines m ON m.id = me.machine_id WHERE me.type = 'coin_inserted' ORDER BY me.timestamp DESC LIMIT 1"
+    );
+    if (result.rowCount === 0) return res.json({ event: null });
+    const row = result.rows[0];
+    res.json({
+      event: {
+        id: row.id,
+        machine_id: row.machine_id,
+        type: row.type,
+        timestamp: row.timestamp,
+        data: row.data,
+        machine_name: row.machine_name,
+        machine_location: row.machine_location,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching latest event:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // Obtener el estado de las máquinas (último ping y si están activas)
 export const getStatus = async (req: Request, res: Response) => {
   try {
