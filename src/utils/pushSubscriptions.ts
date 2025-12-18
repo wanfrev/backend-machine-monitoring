@@ -66,13 +66,9 @@ export async function sendNotificationToAll(payload: any) {
     try {
       return webpush
         .sendNotification(s, JSON.stringify(payload))
-        .then(() => {
-          console.log("Push sent successfully to", s.endpoint);
-        })
         .catch((err: any) => {
           // If subscription is no longer valid, remove it
           if (err?.statusCode === 410 || err?.statusCode === 404) {
-            console.warn("Subscription gone, removing:", s.endpoint);
             removeSubscription(s.endpoint);
           } else {
             console.error("Error sending push to", s.endpoint, err);
