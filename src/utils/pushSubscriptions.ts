@@ -43,10 +43,12 @@ export function getSubscriptions() {
 
 export async function sendNotificationToAll(payload: any) {
   const subs = getSubscriptions();
+  console.log('[pushSubscriptions] sendNotificationToAll called. subscriptions:', subs.length);
   if (!subs.length) return;
   const vapidPublic = process.env.VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
   const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
+  console.log('[pushSubscriptions] VAPID_PUBLIC_KEY present:', !!vapidPublic, 'VAPID_PRIVATE_KEY present:', !!vapidPrivate, 'VAPID_SUBJECT:', subject);
   if (!vapidPublic || !vapidPrivate) {
     console.warn("VAPID keys not set; skipping push notifications");
     return;
