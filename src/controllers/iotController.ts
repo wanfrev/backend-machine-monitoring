@@ -13,7 +13,7 @@ export const receiveData = async (req: Request, res: Response) => {
     maquina_id,
     evento,
     cantidad,
-  } = req.body;
+  } = req.body as any;
 
   const machineId = rawMachineId || maquina_id;
   const event = (rawEvent || evento) as string;
@@ -59,16 +59,12 @@ export const receiveData = async (req: Request, res: Response) => {
   if (rawData && typeof rawData.cantidad !== "undefined") {
     cantidadFinal = rawData.cantidad;
   }
-  const data: any = { ...rawData };
+  const data: any = { ...(rawData || {}) };
   if (typeof cantidadFinal !== "undefined") {
     data.cantidad = cantidadFinal;
   }
 
   // Actualizar status y last_ping de la máquina.
-  // Regla:
-  // - ENCENDIDO o ping => status = 'active'
-  // - APAGADO         => status = 'inactive'
-  // - Otros eventos   => mantienen el status actual
   const now = new Date();
   const machineRow = machineResult.rows[0];
   let newStatus = machineRow.status as string;
@@ -84,13 +80,12 @@ export const receiveData = async (req: Request, res: Response) => {
   );
 
   // Insertar evento
-  // Insertar evento y obtener el id
   const eventResult = await pool.query(
     "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
     [machineId, internalEvent, timestamp || new Date().toISOString(), data]
   );
 
-  // Si es evento de moneda, insertar en coins (con manejo de errores y logs)
+  // Si es evento de moneda, insertar en coins
   if (internalEvent === "coin_inserted") {
     const eventId = eventResult.rows[0].id;
     try {
@@ -102,7 +97,6 @@ export const receiveData = async (req: Request, res: Response) => {
         `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
       );
 
-      // Notificación en tiempo real vía Socket.IO (si está configurado)
       try {
         const io = req.app.get("io");
         if (io) {
@@ -121,7 +115,7 @@ export const receiveData = async (req: Request, res: Response) => {
           socketErr
         );
       }
-      // Enviar notificación push a suscriptores (si VAPID configurado)
+
       try {
         const { sendNotificationToAll } = await import(
           "../utils/pushSubscriptions"
@@ -172,20 +166,27 @@ export const receiveData = async (req: Request, res: Response) => {
       const { sendNotificationToAll } = await import(
         "../utils/pushSubscriptions"
       );
+      const ts = timestamp || new Date().toISOString();
+      const timeStr = new Date(ts).toLocaleString("es-ES");
+      const actionText =
+        internalEvent === "machine_on" ? "encendida" : "apagada";
+      const bodyParts = [`${machineRow.name}`];
+      if (machineRow.location) bodyParts.push(`• ${machineRow.location}`);
+      bodyParts.push(`${actionText} (${timeStr})`);
+      if (data?.reason) bodyParts.push(`— ${data.reason}`);
+
       await sendNotificationToAll({
         title:
           internalEvent === "machine_on"
             ? "Máquina encendida"
             : "Máquina apagada",
-        body: `${machineRow.name} ${
-          machineRow.location ? `• ${machineRow.location}` : ""
-        }${data?.reason ? ` — ${data.reason}` : ""}`.trim(),
+        body: bodyParts.join(" "),
         data: {
           machineId,
           eventId,
           eventType: internalEvent,
           ...data,
-          timestamp: timestamp || new Date().toISOString(),
+          timestamp: ts,
         },
       });
     } catch (pushErr) {
@@ -197,7 +198,6 @@ export const receiveData = async (req: Request, res: Response) => {
   res.status(200).json({ status: "ok" });
 };
 
-// Obtener todos los eventos IoT registrados
 export const getEvents = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
@@ -210,12 +210,11 @@ export const getEvents = async (req: Request, res: Response) => {
   }
 };
 
-// Obtener el estado de las máquinas (último ping y si están activas)
 export const getStatus = async (req: Request, res: Response) => {
   try {
     const now = Date.now();
     const result = await pool.query("SELECT * FROM machines");
-    const status = result.rows.map((machine) => {
+    const status = result.rows.map((machine: any) => {
       const lastPing = machine.last_ping
         ? new Date(machine.last_ping).getTime()
         : 0;

@@ -62,17 +62,19 @@ async function markStaleMachinesInactive() {
             const { sendNotificationToAll } = await import(
               "./utils/pushSubscriptions"
             );
+            const ts = now.toISOString();
+            const timeStr = new Date(ts).toLocaleString("es-ES");
             await sendNotificationToAll({
               title: "Máquina apagada",
               body: `${machineRow?.name ?? row.id} ${
                 machineRow?.location ? `• ${machineRow.location}` : ""
-              } — timeout`.trim(),
+              } — timeout (${timeStr})`.trim(),
               data: {
                 machineId: row.id,
                 eventType: "machine_off",
                 auto: true,
                 reason: "timeout",
-                timestamp: now.toISOString(),
+                timestamp: ts,
               },
             });
           } catch (pushErr) {
