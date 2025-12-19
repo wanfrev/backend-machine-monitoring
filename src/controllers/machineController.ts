@@ -69,7 +69,12 @@ async function generateSequentialId(name: string): Promise<string> {
 
 export const getMachines = (req: Request, res: Response) => {
   pool
-    .query("SELECT * FROM machines")
+    .query(
+      `SELECT m.*,
+        (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_on' ORDER BY timestamp DESC LIMIT 1) AS last_on,
+        (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_off' ORDER BY timestamp DESC LIMIT 1) AS last_off
+      FROM machines m`
+    )
     .then((result) => res.json(result.rows))
     .catch((err) => {
       console.error("Error fetching machines:", err);
@@ -80,7 +85,13 @@ export const getMachines = (req: Request, res: Response) => {
 export const getMachineById = (req: Request, res: Response) => {
   const { id } = req.params;
   pool
-    .query("SELECT * FROM machines WHERE id = $1", [id])
+    .query(
+      `SELECT m.*,
+        (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_on' ORDER BY timestamp DESC LIMIT 1) AS last_on,
+        (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_off' ORDER BY timestamp DESC LIMIT 1) AS last_off
+      FROM machines m WHERE m.id = $1`,
+      [id]
+    )
     .then((result) => {
       if (result.rowCount === 0)
         return res.status(404).json({ message: "Machine not found" });
