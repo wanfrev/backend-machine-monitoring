@@ -146,6 +146,53 @@ export const receiveData = async (req: Request, res: Response) => {
     }
   }
 
+  // Si es evento de encendido/apagado, emitir por Socket.IO y enviar push
+  if (internalEvent === "machine_on" || internalEvent === "machine_off") {
+    const eventId = eventResult.rows[0].id;
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        io.emit(internalEvent, {
+          machineId,
+          machineName: machineRow.name,
+          location: machineRow.location,
+          eventId,
+          data,
+          timestamp: timestamp || new Date().toISOString(),
+        });
+      }
+    } catch (socketErr) {
+      console.error(
+        `Error emitiendo evento ${internalEvent} por Socket.IO:`,
+        socketErr
+      );
+    }
+
+    try {
+      const { sendNotificationToAll } = await import(
+        "../utils/pushSubscriptions"
+      );
+      await sendNotificationToAll({
+        title:
+          internalEvent === "machine_on"
+            ? "Máquina encendida"
+            : "Máquina apagada",
+        body: `${machineRow.name} ${
+          machineRow.location ? `• ${machineRow.location}` : ""
+        }${data?.reason ? ` — ${data.reason}` : ""}`.trim(),
+        data: {
+          machineId,
+          eventId,
+          eventType: internalEvent,
+          ...data,
+          timestamp: timestamp || new Date().toISOString(),
+        },
+      });
+    } catch (pushErr) {
+      console.error("Error enviando notificación push:", pushErr);
+    }
+  }
+
   console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
   res.status(200).json({ status: "ok" });
 };

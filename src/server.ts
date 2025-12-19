@@ -41,6 +41,49 @@ async function markStaleMachinesInactive() {
             { auto: true, reason: "timeout" },
           ]
         );
+        // Emitir evento y notificar push a suscriptores
+        try {
+          const machineRes = await pool.query(
+            "SELECT * FROM machines WHERE id = $1",
+            [row.id]
+          );
+          const machineRow = machineRes.rows[0];
+          const io = app.get("io");
+          if (io) {
+            io.emit("machine_off", {
+              machineId: row.id,
+              machineName: machineRow?.name,
+              location: machineRow?.location,
+              data: { auto: true, reason: "timeout" },
+              timestamp: now.toISOString(),
+            });
+          }
+          try {
+            const { sendNotificationToAll } = await import(
+              "./utils/pushSubscriptions"
+            );
+            await sendNotificationToAll({
+              title: "Máquina apagada",
+              body: `${machineRow?.name ?? row.id} ${
+                machineRow?.location ? `• ${machineRow.location}` : ""
+              } — timeout`.trim(),
+              data: {
+                machineId: row.id,
+                eventType: "machine_off",
+                auto: true,
+                reason: "timeout",
+                timestamp: now.toISOString(),
+              },
+            });
+          } catch (pushErr) {
+            console.error("Error enviando notificación push (cron):", pushErr);
+          }
+        } catch (err) {
+          console.error(
+            "Error al emitir notificación cron para machine_off:",
+            err
+          );
+        }
         // 2. Actualizar estado de la máquina
         await pool.query(
           "UPDATE machines SET status = 'inactive' WHERE id = $1",
