@@ -63,14 +63,17 @@ async function markStaleMachinesInactive() {
               "./utils/pushSubscriptions"
             );
             const ts = now.toISOString();
-            const timeStr = new Date(ts).toLocaleString("es-VE", {
-              timeZone: "America/Caracas",
-            });
+            // Asegura que el timestamp se interprete como UTC si no tiene zona
+            let dateObj: Date;
+            if (typeof ts === "string" && !ts.endsWith("Z") && !ts.includes("+") && !ts.includes("-") && ts.length > 10) {
+              dateObj = new Date(ts + "Z");
+            } else {
+              dateObj = new Date(ts);
+            }
+            const timeStr = dateObj.toLocaleString("es-VE", { timeZone: "America/Caracas" });
             await sendNotificationToAll({
               title: "Máquina apagada",
-              body: `${machineRow?.name ?? row.id} ${
-                machineRow?.location ? `• ${machineRow.location}` : ""
-              } — timeout (${timeStr})`.trim(),
+              body: `${machineRow?.name ?? row.id} ${machineRow?.location ? `• ${machineRow.location}` : ""} — timeout (${timeStr})`.trim(),
               data: {
                 machineId: row.id,
                 eventType: "machine_off",

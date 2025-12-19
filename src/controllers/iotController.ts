@@ -167,9 +167,14 @@ export const receiveData = async (req: Request, res: Response) => {
         "../utils/pushSubscriptions"
       );
       const ts = timestamp || new Date().toISOString();
-      const timeStr = new Date(ts).toLocaleString("es-VE", {
-        timeZone: "America/Caracas",
-      });
+        // Asegura que el timestamp se interprete como UTC si no tiene zona
+        let dateObj: Date;
+        if (typeof ts === "string" && !ts.endsWith("Z") && !ts.includes("+") && !ts.includes("-") && ts.length > 10) {
+          dateObj = new Date(ts + "Z");
+        } else {
+          dateObj = new Date(ts);
+        }
+        const timeStr = dateObj.toLocaleString("es-VE", { timeZone: "America/Caracas" });
       const actionText =
         internalEvent === "machine_on" ? "encendida" : "apagada";
       const bodyParts = [`${machineRow.name}`];
