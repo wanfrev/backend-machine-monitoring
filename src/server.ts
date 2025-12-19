@@ -63,7 +63,9 @@ async function markStaleMachinesInactive() {
               "./utils/pushSubscriptions"
             );
             const ts = now.toISOString();
-            const timeStr = new Date(ts).toLocaleString("es-ES");
+            const timeStr = new Date(ts).toLocaleString("es-VE", {
+              timeZone: "America/Caracas",
+            });
             await sendNotificationToAll({
               title: "Máquina apagada",
               body: `${machineRow?.name ?? row.id} ${

@@ -167,7 +167,9 @@ export const receiveData = async (req: Request, res: Response) => {
         "../utils/pushSubscriptions"
       );
       const ts = timestamp || new Date().toISOString();
-      const timeStr = new Date(ts).toLocaleString("es-ES");
+      const timeStr = new Date(ts).toLocaleString("es-VE", {
+        timeZone: "America/Caracas",
+      });
       const actionText =
         internalEvent === "machine_on" ? "encendida" : "apagada";
       const bodyParts = [`${machineRow.name}`];
