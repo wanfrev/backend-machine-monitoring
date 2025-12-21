@@ -215,10 +215,61 @@ export const receiveData = async (req: Request, res: Response) => {
 
 export const getEvents = async (req: Request, res: Response) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM machine_events ORDER BY timestamp DESC LIMIT 100"
-    );
-    res.json({ events: result.rows });
+    const {
+      range,
+      startDate,
+      endDate,
+      page = "1",
+      pageSize = "20",
+    } = req.query as any;
+
+    const params: any[] = [];
+    const where: string[] = [];
+
+    // Rango: '7d' o '30d' -> calcular startDate
+    if (range === "7d" || range === "30d") {
+      const days = range === "7d" ? 7 : 30;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      params.push(since.toISOString());
+      where.push(`timestamp >= $${params.length}`);
+    }
+
+    // Si envían startDate/endDate explícitos, usar esos (anulan range)
+    if (startDate) {
+      params.push(String(startDate));
+      where.push(`timestamp >= $${params.length}`);
+    }
+    if (endDate) {
+      params.push(String(endDate));
+      where.push(`timestamp <= $${params.length}`);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.max(1, Math.min(1000, Number(pageSize) || 20));
+    const offset = (p - 1) * ps;
+
+    // total count for pagination
+    const countSql = `SELECT COUNT(*) as cnt FROM machine_events ${whereSql}`;
+    const countResult = await pool.query(countSql, params);
+    const total = Number(countResult.rows[0]?.cnt ?? 0);
+
+    const sql = `SELECT * FROM machine_events ${whereSql} ORDER BY timestamp DESC LIMIT $${
+      params.length + 1
+    } OFFSET $${params.length + 2}`;
+    const sqlParams = params.concat([ps, offset]);
+    const result = await pool.query(sql, sqlParams);
+
+    const totalPages = Math.max(1, Math.ceil(total / ps));
+
+    res.json({
+      events: result.rows,
+      total,
+      page: p,
+      pageSize: ps,
+      totalPages,
+    });
   } catch (err) {
     console.error("Error fetching events:", err);
     res.status(500).json({ message: "Server error" });
