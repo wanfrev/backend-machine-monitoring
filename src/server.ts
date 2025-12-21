@@ -17,8 +17,16 @@ pool
   );
 
 // Cron simple en memoria: marca máquinas como inactivas si no han enviado PING reciente
-const HEARTBEAT_TIMEOUT_MS = 1 * 60 * 1000; // 1 minuto
-const HEARTBEAT_CHECK_INTERVAL_MS = 60 * 1000; // cada 1 minuto
+// Tiempo por defecto: 3 minutos (configurable vía env HEARTBEAT_TIMEOUT_MS en ms)
+const HEARTBEAT_TIMEOUT_MS = Number(
+  process.env.HEARTBEAT_TIMEOUT_MS || 3 * 60 * 1000
+);
+// Comprobación periódica (por defecto 60s)
+const HEARTBEAT_CHECK_INTERVAL_MS = Number(
+  process.env.HEARTBEAT_CHECK_INTERVAL_MS || 60 * 1000
+);
+// Requerir N intervalos perdidos antes de marcar inactive (evita flapping)
+const MISSED_PINGS_THRESHOLD = Number(process.env.MISSED_PINGS_THRESHOLD || 2);
 
 async function markStaleMachinesInactive() {
   try {
@@ -30,7 +38,7 @@ async function markStaleMachinesInactive() {
     for (const row of result.rows as { id: string; last_ping: Date | null }[]) {
       if (!row.last_ping) continue;
       const diff = now.getTime() - new Date(row.last_ping).getTime();
-      if (diff > HEARTBEAT_TIMEOUT_MS) {
+      if (diff > HEARTBEAT_TIMEOUT_MS * MISSED_PINGS_THRESHOLD) {
         // 1. Insertar evento machine_off en machine_events
         await pool.query(
           "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4)",

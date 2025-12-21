@@ -2,7 +2,19 @@ import fs from "fs";
 import path from "path";
 import webpush from "web-push";
 
-const DB_PATH = path.join(__dirname, "..", "..", "push_subscriptions.json");
+// Allow configuring a storage path outside the repo to avoid process watchers
+// restarting the app when the file is written. Default: <cwd>/data/push_subscriptions.json
+const DEFAULT_DATA_DIR = path.join(process.cwd(), "data");
+try {
+  if (!fs.existsSync(DEFAULT_DATA_DIR))
+    fs.mkdirSync(DEFAULT_DATA_DIR, { recursive: true });
+} catch (e) {
+  // ignore directory creation errors; fallback to repo path below
+}
+
+const DB_PATH =
+  process.env.PUSH_DB_PATH ||
+  path.join(DEFAULT_DATA_DIR, "push_subscriptions.json");
 
 function readDb(): any[] {
   try {
