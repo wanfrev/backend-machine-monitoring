@@ -221,10 +221,13 @@ export const getEvents = async (req: Request, res: Response) => {
       endDate,
       page = "1",
       pageSize = "20",
+      includePings = "false",
     } = req.query as any;
 
     const params: any[] = [];
     const where: string[] = [];
+
+    const includePingEvents = String(includePings) === "true";
 
     // Rango: '7d' o '30d' -> calcular startDate
     if (range === "7d" || range === "30d") {
@@ -242,6 +245,11 @@ export const getEvents = async (req: Request, res: Response) => {
     if (endDate) {
       params.push(String(endDate));
       where.push(`timestamp <= $${params.length}`);
+    }
+
+    // Por defecto no incluir eventos 'ping' en el histórico para evitar ruido
+    if (!includePingEvents) {
+      where.push("type <> 'ping'");
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -296,6 +304,5 @@ export const getStatus = async (req: Request, res: Response) => {
     res.json({ status });
   } catch (err) {
     console.error("Error fetching machine status:", err);
-    res.status(500).json({ message: "Server error" });
   }
 };
