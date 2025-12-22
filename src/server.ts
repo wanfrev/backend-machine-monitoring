@@ -17,16 +17,17 @@ pool
   );
 
 // Cron simple en memoria: marca máquinas como inactivas si no han enviado PING reciente
-// Tiempo por defecto: 3 minutos (configurable vía env HEARTBEAT_TIMEOUT_MS en ms)
+// Tiempo por defecto: 1 minuto (configurable vía env HEARTBEAT_TIMEOUT_MS en ms)
 const HEARTBEAT_TIMEOUT_MS = Number(
-  process.env.HEARTBEAT_TIMEOUT_MS || 3 * 60 * 1000
+  process.env.HEARTBEAT_TIMEOUT_MS || 1 * 60 * 1000
 );
 // Comprobación periódica (por defecto 60s)
 const HEARTBEAT_CHECK_INTERVAL_MS = Number(
   process.env.HEARTBEAT_CHECK_INTERVAL_MS || 60 * 1000
 );
 // Requerir N intervalos perdidos antes de marcar inactive (evita flapping)
-const MISSED_PINGS_THRESHOLD = Number(process.env.MISSED_PINGS_THRESHOLD || 2);
+// Por defecto 1 (marcar inactive tras 1 * HEARTBEAT_TIMEOUT_MS)
+const MISSED_PINGS_THRESHOLD = Number(process.env.MISSED_PINGS_THRESHOLD || 1);
 
 async function markStaleMachinesInactive() {
   try {

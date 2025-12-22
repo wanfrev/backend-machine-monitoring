@@ -2,7 +2,9 @@ import { Request, Response } from "express";
 import { pool } from "../db";
 import { MachineEvent } from "../models/types";
 
-const HEARTBEAT_TIMEOUT_MS = 1 * 60 * 1000; // 1 minuto
+const HEARTBEAT_TIMEOUT_MS = Number(
+  process.env.HEARTBEAT_TIMEOUT_MS || 1 * 60 * 1000
+); // 1 minuto
 
 export const receiveData = async (req: Request, res: Response) => {
   const {
