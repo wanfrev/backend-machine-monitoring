@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import webpush from "web-push";
+import { pool } from "../db";
 
 // Allow configuring a storage path outside the repo to avoid process watchers
 // restarting the app when the file is written. Default: <cwd>/data/push_subscriptions.json
@@ -13,8 +14,13 @@ try {
 }
 
 const DB_PATH =
+  process.env.PUSH_SUBSCRIPTIONS_PATH ||
   process.env.PUSH_DB_PATH ||
   path.join(DEFAULT_DATA_DIR, "push_subscriptions.json");
+
+const USE_DB =
+  (process.env.PUSH_USE_DB === "true" || process.env.PUSH_USE_DB === "1") &&
+  !!process.env.DATABASE_URL;
 
 function readDb(): any[] {
   try {
@@ -29,13 +35,24 @@ function readDb(): any[] {
 
 function writeDb(arr: any[]) {
   try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(arr, null, 2), "utf-8");
+    // atomic write: write to temp then rename
+    const tmp = DB_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(arr, null, 2), "utf-8");
+    fs.renameSync(tmp, DB_PATH);
   } catch (e) {
     console.error("Error writing push subscriptions DB:", e);
   }
 }
 
 export function addSubscription(sub: any) {
+  if (USE_DB) {
+    // fire-and-forget insert into Postgres; avoid blocking API route
+    const q = `INSERT INTO push_subscriptions(endpoint, subscription) VALUES($1, $2) ON CONFLICT (endpoint) DO NOTHING`;
+    pool
+      .query(q, [sub.endpoint, sub])
+      .catch((err) => console.error("Error inserting push subscription:", err));
+    return;
+  }
   const all = readDb();
   // avoid duplicates by endpoint
   const exists = all.find((s) => s.endpoint === sub.endpoint);
@@ -45,16 +62,40 @@ export function addSubscription(sub: any) {
 }
 
 export function removeSubscription(endpoint: string) {
+  if (USE_DB) {
+    pool
+      .query("DELETE FROM push_subscriptions WHERE endpoint = $1", [endpoint])
+      .catch((err) => console.error("Error removing push subscription:", err));
+    return;
+  }
   const all = readDb().filter((s) => s.endpoint !== endpoint);
   writeDb(all);
 }
 
 export function getSubscriptions() {
+  if (USE_DB) {
+    // synchronous semantics not possible for DB; return empty and let
+    // sendNotificationToAll read from DB directly
+    return [] as any[];
+  }
   return readDb();
 }
 
 export async function sendNotificationToAll(payload: any) {
-  const subs = getSubscriptions();
+  let subs: any[] = [];
+  if (USE_DB) {
+    try {
+      const res = await pool.query(
+        "SELECT subscription FROM push_subscriptions"
+      );
+      subs = res.rows.map((r: any) => r.subscription).filter(Boolean);
+    } catch (e) {
+      console.error("Error querying push subscriptions:", e);
+      subs = [];
+    }
+  } else {
+    subs = getSubscriptions();
+  }
   if (!subs.length) return;
   const vapidPublic = process.env.VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
