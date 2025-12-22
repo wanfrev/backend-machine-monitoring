@@ -8,19 +8,29 @@ import {
 const router = Router();
 
 // Registrar una suscripción push desde el cliente
-router.post("/subscribe", (req, res) => {
+router.post("/subscribe", async (req, res) => {
   const sub = req.body;
   if (!sub || !sub.endpoint)
     return res.status(400).json({ message: "Invalid subscription" });
-  addSubscription(sub);
-  res.json({ status: "ok" });
+  try {
+    await addSubscription(sub);
+    return res.json({ status: "ok" });
+  } catch (err) {
+    console.error("Error in /api/push/subscribe:", err);
+    return res.status(500).json({ message: "Failed to save subscription" });
+  }
 });
 
-router.post("/unsubscribe", (req, res) => {
+router.post("/unsubscribe", async (req, res) => {
   const { endpoint } = req.body;
   if (!endpoint) return res.status(400).json({ message: "Missing endpoint" });
-  removeSubscription(endpoint);
-  res.json({ status: "ok" });
+  try {
+    await removeSubscription(endpoint);
+    return res.json({ status: "ok" });
+  } catch (err) {
+    console.error("Error in /api/push/unsubscribe:", err);
+    return res.status(500).json({ message: "Failed to remove subscription" });
+  }
 });
 
 router.get("/vapid-public", (req, res) => {

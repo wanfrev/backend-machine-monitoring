@@ -44,32 +44,49 @@ function writeDb(arr: any[]) {
   }
 }
 
-export function addSubscription(sub: any) {
+export async function addSubscription(sub: any): Promise<void> {
   if (USE_DB) {
-    // fire-and-forget insert into Postgres; avoid blocking API route
     const q = `INSERT INTO push_subscriptions(endpoint, subscription) VALUES($1, $2) ON CONFLICT (endpoint) DO NOTHING`;
-    pool
-      .query(q, [sub.endpoint, sub])
-      .catch((err) => console.error("Error inserting push subscription:", err));
+    try {
+      await pool.query(q, [sub.endpoint, sub]);
+    } catch (err) {
+      console.error("Error inserting push subscription:", err);
+      throw err;
+    }
     return;
   }
-  const all = readDb();
-  // avoid duplicates by endpoint
-  const exists = all.find((s) => s.endpoint === sub.endpoint);
-  if (exists) return;
-  all.push(sub);
-  writeDb(all);
+  try {
+    const all = readDb();
+    // avoid duplicates by endpoint
+    const exists = all.find((s) => s.endpoint === sub.endpoint);
+    if (exists) return;
+    all.push(sub);
+    writeDb(all);
+  } catch (err) {
+    console.error("Error adding subscription to file DB:", err);
+    throw err;
+  }
 }
 
-export function removeSubscription(endpoint: string) {
+export async function removeSubscription(endpoint: string): Promise<void> {
   if (USE_DB) {
-    pool
-      .query("DELETE FROM push_subscriptions WHERE endpoint = $1", [endpoint])
-      .catch((err) => console.error("Error removing push subscription:", err));
+    try {
+      await pool.query("DELETE FROM push_subscriptions WHERE endpoint = $1", [
+        endpoint,
+      ]);
+    } catch (err) {
+      console.error("Error removing push subscription:", err);
+      throw err;
+    }
     return;
   }
-  const all = readDb().filter((s) => s.endpoint !== endpoint);
-  writeDb(all);
+  try {
+    const all = readDb().filter((s) => s.endpoint !== endpoint);
+    writeDb(all);
+  } catch (err) {
+    console.error("Error removing subscription from file DB:", err);
+    throw err;
+  }
 }
 
 export function getSubscriptions() {
