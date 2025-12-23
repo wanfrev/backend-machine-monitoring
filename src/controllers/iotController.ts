@@ -102,14 +102,27 @@ export const receiveData = async (req: Request, res: Response) => {
       try {
         const io = req.app.get("io");
         if (io) {
-          io.emit("coin_inserted", {
-            machineId,
-            machineName: machineRow.name,
-            location: machineRow.location,
-            eventId,
-            amount: data.cantidad ?? 1,
-            timestamp: timestamp || new Date().toISOString(),
-          });
+          try {
+            console.log(
+              `Emitiendo socket coin_inserted -> machine=${machineId} eventId=${eventId}`
+            );
+            const emitStart = Date.now();
+            io.emit("coin_inserted", {
+              machineId,
+              machineName: machineRow.name,
+              location: machineRow.location,
+              eventId,
+              amount: data.cantidad ?? 1,
+              timestamp: timestamp || new Date().toISOString(),
+            });
+            console.log(
+              `Emitido coin_inserted (took ${
+                Date.now() - emitStart
+              }ms) -> machine=${machineId}`
+            );
+          } catch (e) {
+            console.error("Error emitiendo coin_inserted:", e);
+          }
         }
       } catch (socketErr) {
         console.error(
@@ -122,20 +135,36 @@ export const receiveData = async (req: Request, res: Response) => {
         const { sendNotificationToAll } = await import(
           "../utils/pushSubscriptions"
         );
-        await sendNotificationToAll({
-          title: "Moneda ingresada",
-          body: `${machineRow.name} ${
-            machineRow.location ? `• ${machineRow.location}` : ""
-          }`.trim(),
-          data: {
-            machineId,
-            eventId,
-            amount: data.cantidad ?? 1,
-            timestamp: timestamp || new Date().toISOString(),
-          },
-        });
+        // Fire-and-forget: don't block the HTTP handler while sending web-push
+        (async () => {
+          const start = Date.now();
+          try {
+            await sendNotificationToAll({
+              title: "Moneda ingresada",
+              body: `${machineRow.name} ${
+                machineRow.location ? `• ${machineRow.location}` : ""
+              }`.trim(),
+              data: {
+                machineId,
+                eventId,
+                amount: data.cantidad ?? 1,
+                timestamp: timestamp || new Date().toISOString(),
+              },
+            });
+            console.log(
+              `Push notifications sent (took ${
+                Date.now() - start
+              }ms) for machine=${machineId}`
+            );
+          } catch (err) {
+            console.error(
+              "Error enviando notificación push (background):",
+              err
+            );
+          }
+        })();
       } catch (pushErr) {
-        console.error("Error enviando notificación push:", pushErr);
+        console.error("Error iniciando envío push:", pushErr);
       }
     } catch (err) {
       console.error("Error insertando en coins:", err);
