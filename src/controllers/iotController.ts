@@ -240,6 +240,72 @@ export const receiveData = async (req: Request, res: Response) => {
     }
   }
 
+  // Si recibimos un PING y la máquina estaba marcada como inactive,
+  // tratarlo como re-encendido automático: insertar evento machine_on,
+  // emitir por Socket.IO y enviar notificación push (fire-and-forget).
+  if (internalEvent === "ping" && machineRow.status !== "active") {
+    try {
+      const onTs = timestamp || new Date().toISOString();
+      const onRes = await pool.query(
+        "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
+        [machineId, "machine_on", onTs, { auto: true, reason: "ping" }]
+      );
+      const onEventId = onRes.rows[0].id;
+      try {
+        const io = req.app.get("io");
+        if (io) {
+          try {
+            io.emit("machine_on", {
+              machineId,
+              machineName: machineRow.name,
+              location: machineRow.location,
+              eventId: onEventId,
+              data: { auto: true, reason: "ping" },
+              timestamp: onTs,
+            });
+            console.log(
+              `Auto machine_on emitted due to ping -> machine=${machineId} eventId=${onEventId}`
+            );
+          } catch (emitErr) {
+            console.error("Error emitiendo auto machine_on:", emitErr);
+          }
+        }
+      } catch (ioErr) {
+        console.error("Error accediendo a io para auto machine_on:", ioErr);
+      }
+
+      try {
+        const { sendNotificationToAll } = await import(
+          "../utils/pushSubscriptions"
+        );
+        (async () => {
+          try {
+            await sendNotificationToAll({
+              title: "Máquina encendida",
+              body: `${machineRow.name} ${
+                machineRow.location ? `• ${machineRow.location}` : ""
+              } — reconectada`.trim(),
+              data: {
+                machineId,
+                eventId: onEventId,
+                eventType: "machine_on",
+                auto: true,
+                reason: "ping",
+                timestamp: onTs,
+              },
+            });
+          } catch (pushErr) {
+            console.error("Error enviando push auto machine_on:", pushErr);
+          }
+        })();
+      } catch (pushInitErr) {
+        console.error("Error iniciando push auto machine_on:", pushInitErr);
+      }
+    } catch (err) {
+      console.error("Error insertando evento auto machine_on:", err);
+    }
+  }
+
   console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
   res.status(200).json({ status: "ok" });
 };
