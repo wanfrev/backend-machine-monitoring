@@ -312,6 +312,7 @@ export const receiveData = async (req: Request, res: Response) => {
 
 export const getEvents = async (req: Request, res: Response) => {
   try {
+    console.log("getEvents called with query:", req.query);
     const {
       range,
       startDate,
@@ -378,6 +379,21 @@ export const getEvents = async (req: Request, res: Response) => {
     } OFFSET $${params.length + 2}`;
     const sqlParams = params.concat([ps, offset]);
     const result = await pool.query(sql, sqlParams);
+    try {
+      console.log(
+        `getEvents returning ${result.rowCount} rows; first id=${
+          result.rows[0]?.id ?? "-"
+        } ts=${result.rows[0]?.timestamp ?? "-"}`
+      );
+    } catch (e) {
+      /* ignore */
+    }
+    // Avoid caching API responses in SW/browser
+    try {
+      res.setHeader("Cache-Control", "no-store");
+    } catch (e) {
+      /* ignore */
+    }
 
     const totalPages = Math.max(1, Math.ceil(total / ps));
 
