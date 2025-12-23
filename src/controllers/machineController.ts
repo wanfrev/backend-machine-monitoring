@@ -147,6 +147,15 @@ export const updateMachine = async (req: Request, res: Response) => {
     }
     const existing = existingRes.rows[0] as Machine;
 
+    // Diagnostic logging
+    console.log("[updateMachine] incoming payload:", {
+      name,
+      location,
+      status,
+      type,
+    });
+    console.log("[updateMachine] existing machine:", existing);
+
     // Infer old and new type (Boxeo vs Agilidad) — backend historically infers type from name
     const inferTypeFromName = (n: string) =>
       n && n.startsWith("Boxeo") ? "Boxeo" : "Agilidad";
