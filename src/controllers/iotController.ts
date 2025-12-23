@@ -307,7 +307,15 @@ export const receiveData = async (req: Request, res: Response) => {
   }
 
   // Only log important events to keep logs clean (coins / on / off)
-  if (["coin_inserted", "machine_on", "machine_off"].includes(internalEvent)) {
+  // Enable ping logging by setting LOG_PINGS=true in the environment if you
+  // want to see incoming ping messages in the server logs.
+  const logPings =
+    String(process.env.LOG_PINGS || "false").toLowerCase() === "true";
+  const shouldLogEvent =
+    ["coin_inserted", "machine_on", "machine_off"].includes(internalEvent) ||
+    (internalEvent === "ping" && logPings);
+
+  if (shouldLogEvent) {
     console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
   }
   res.status(200).json({ status: "ok" });
