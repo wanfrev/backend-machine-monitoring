@@ -7,102 +7,102 @@ const HEARTBEAT_TIMEOUT_MS = Number(
 ); // 1 minuto
 
 export const receiveData = async (req: Request, res: Response) => {
-  const {
-    machineId: rawMachineId,
-    event: rawEvent,
-    data: rawData,
-    timestamp,
-    maquina_id,
-    evento,
-    cantidad,
-  } = req.body as any;
+  try {
+    const {
+      machineId: rawMachineId,
+      event: rawEvent,
+      data: rawData,
+      timestamp,
+      maquina_id,
+      evento,
+      cantidad,
+    } = req.body || ({} as any);
 
-  const machineId = rawMachineId || maquina_id;
-  const event = (rawEvent || evento) as string;
+    const machineId = rawMachineId || maquina_id;
+    const event = rawEvent || evento;
 
-  if (!machineId || !event) {
-    return res
-      .status(400)
-      .json({ message: "Missing machineId/maquina_id or event/evento" });
-  }
+    if (!machineId || !event) {
+      return res
+        .status(400)
+        .json({ message: "Missing machineId/maquina_id or event/evento" });
+    }
 
-  // Verificar que la máquina existe
-  const machineResult = await pool.query(
-    "SELECT * FROM machines WHERE id = $1",
-    [machineId]
-  );
-  if (machineResult.rowCount === 0) {
-    console.warn(`Received data from unknown machine: ${machineId}`);
-    return res.status(404).json({ message: "Machine not found" });
-  }
+    // Verificar que la máquina existe
+    const machineResult = await pool.query(
+      "SELECT * FROM machines WHERE id = $1",
+      [machineId]
+    );
+    if (machineResult.rowCount === 0) {
+      console.warn(`Received data from unknown machine: ${machineId}`);
+      return res.status(404).json({ message: "Machine not found" });
+    }
 
-  // Mapear eventos
-  let internalEvent: string;
-  if (event === "ENCENDIDO") internalEvent = "machine_on";
-  else if (event === "APAGADO") internalEvent = "machine_off";
-  else if (event === "MONEDA") internalEvent = "coin_inserted";
-  else if (
-    [
-      "coin_inserted",
-      "machine_on",
-      "machine_off",
-      "game_start",
-      "game_end",
-      "ping",
-    ].includes(event)
-  ) {
-    internalEvent = event;
-  } else {
-    internalEvent = "ping";
-  }
+    // Mapear eventos
+    let internalEvent: string;
+    if (event === "ENCENDIDO") internalEvent = "machine_on";
+    else if (event === "APAGADO") internalEvent = "machine_off";
+    else if (event === "MONEDA") internalEvent = "coin_inserted";
+    else if (
+      [
+        "coin_inserted",
+        "machine_on",
+        "machine_off",
+        "game_start",
+        "game_end",
+        "ping",
+      ].includes(event)
+    ) {
+      internalEvent = event as string;
+    } else {
+      internalEvent = "ping";
+    }
 
-  // Unificar cantidad: si viene en rawData.cantidad, cantidad, o ninguna
-  let cantidadFinal = cantidad;
-  if (rawData && typeof rawData.cantidad !== "undefined") {
-    cantidadFinal = rawData.cantidad;
-  }
-  const data: any = { ...(rawData || {}) };
-  if (typeof cantidadFinal !== "undefined") {
-    data.cantidad = cantidadFinal;
-  }
+    // Unificar cantidad: si viene en rawData.cantidad, cantidad, o ninguna
+    let cantidadFinal = cantidad as any;
+    if (rawData && typeof rawData.cantidad !== "undefined") {
+      cantidadFinal = rawData.cantidad;
+    }
+    const data: any = { ...(rawData || {}) };
+    if (typeof cantidadFinal !== "undefined") {
+      data.cantidad = cantidadFinal;
+    }
 
-  // Actualizar status y last_ping de la máquina.
-  const now = new Date();
-  const machineRow = machineResult.rows[0];
-  let newStatus = machineRow.status as string;
-  if (internalEvent === "machine_on" || internalEvent === "ping") {
-    newStatus = "active";
-  } else if (internalEvent === "machine_off") {
-    newStatus = "inactive";
-  }
+    // Actualizar status y last_ping de la máquina.
+    const now = new Date();
+    const machineRow = machineResult.rows[0];
+    let newStatus = machineRow.status as string;
+    if (internalEvent === "machine_on" || internalEvent === "ping") {
+      newStatus = "active";
+    } else if (internalEvent === "machine_off") {
+      newStatus = "inactive";
+    }
 
-  await pool.query(
-    "UPDATE machines SET last_ping = $1, status = $2 WHERE id = $3",
-    [now, newStatus, machineId]
-  );
+    await pool.query(
+      "UPDATE machines SET last_ping = $1, status = $2 WHERE id = $3",
+      [now, newStatus, machineId]
+    );
 
-  // Insertar evento
-  const eventResult = await pool.query(
-    "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-    [machineId, internalEvent, timestamp || new Date().toISOString(), data]
-  );
+    // Insertar evento
+    const eventResult = await pool.query(
+      "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
+      [machineId, internalEvent, timestamp || new Date().toISOString(), data]
+    );
 
-  // Si es evento de moneda, insertar en coins
-  if (internalEvent === "coin_inserted") {
-    const eventId = eventResult.rows[0].id;
-    try {
-      await pool.query(
-        "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
-        [machineId, eventId]
-      );
-      console.log(
-        `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
-      );
-
+    // Si es evento de moneda, insertar en coins
+    if (internalEvent === "coin_inserted") {
+      const eventId = eventResult.rows[0].id;
       try {
-        const io = req.app.get("io");
-        if (io) {
-          try {
+        await pool.query(
+          "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
+          [machineId, eventId]
+        );
+        console.log(
+          `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
+        );
+
+        try {
+          const io = req.app.get("io");
+          if (io) {
             io.emit("coin_inserted", {
               machineId,
               machineName: machineRow.name,
@@ -111,136 +111,52 @@ export const receiveData = async (req: Request, res: Response) => {
               amount: data.cantidad ?? 1,
               timestamp: timestamp || new Date().toISOString(),
             });
-          } catch (e) {
-            console.error("Error emitiendo coin_inserted:", e);
           }
+        } catch (socketErr) {
+          console.error(
+            "Error emitiendo evento coin_inserted por Socket.IO:",
+            socketErr
+          );
         }
-      } catch (socketErr) {
-        console.error(
-          "Error emitiendo evento coin_inserted por Socket.IO:",
-          socketErr
-        );
-      }
 
+        try {
+          const { sendNotificationToAll } = await import(
+            "../utils/pushSubscriptions"
+          );
+          await sendNotificationToAll({
+            title: "Moneda ingresada",
+            body: `${machineRow.name} ${
+              machineRow.location ? `• ${machineRow.location}` : ""
+            }`.trim(),
+            data: {
+              machineId,
+              eventId,
+              amount: data.cantidad ?? 1,
+              timestamp: timestamp || new Date().toISOString(),
+            },
+          });
+        } catch (pushErr) {
+          console.error("Error enviando notificación push:", pushErr);
+        }
+      } catch (err) {
+        console.error("Error insertando en coins:", err);
+      }
+    }
+
+    // Si recibimos un PING y la máquina estaba marcada como inactive,
+    // tratarlo como re-encendido automático: insertar evento machine_on,
+    // emitir por Socket.IO y enviar notificación push (fire-and-forget).
+    if (internalEvent === "ping" && machineRow.status !== "active") {
       try {
-        const { sendNotificationToAll } = await import(
-          "../utils/pushSubscriptions"
+        const onTs = timestamp || new Date().toISOString();
+        const onRes = await pool.query(
+          "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
+          [machineId, "machine_on", onTs, { auto: true, reason: "ping" }]
         );
-        // Fire-and-forget: don't block the HTTP handler while sending web-push
-        (async () => {
-          const start = Date.now();
-          try {
-            await sendNotificationToAll({
-              title: "Moneda ingresada",
-              body: `${machineRow.name} ${
-                machineRow.location ? `• ${machineRow.location}` : ""
-              }`.trim(),
-              data: {
-                machineId,
-                eventId,
-                amount: data.cantidad ?? 1,
-                timestamp: timestamp || new Date().toISOString(),
-              },
-            });
-          } catch (err) {
-            console.error(
-              "Error enviando notificación push (background):",
-              err
-            );
-          }
-        })();
-      } catch (pushErr) {
-        console.error("Error iniciando envío push:", pushErr);
-      }
-    } catch (err) {
-      console.error("Error insertando en coins:", err);
-    }
-  }
-
-  // Si es evento de encendido/apagado, emitir por Socket.IO y enviar push
-  if (internalEvent === "machine_on" || internalEvent === "machine_off") {
-    const eventId = eventResult.rows[0].id;
-    try {
-      const io = req.app.get("io");
-      if (io) {
-        io.emit(internalEvent, {
-          machineId,
-          machineName: machineRow.name,
-          location: machineRow.location,
-          eventId,
-          data,
-          timestamp: timestamp || new Date().toISOString(),
-        });
-      }
-    } catch (socketErr) {
-      console.error(
-        `Error emitiendo evento ${internalEvent} por Socket.IO:`,
-        socketErr
-      );
-    }
-
-    try {
-      const { sendNotificationToAll } = await import(
-        "../utils/pushSubscriptions"
-      );
-      const ts = timestamp || new Date().toISOString();
-      // Asegura que el timestamp se interprete como UTC si no tiene zona
-      let dateObj: Date;
-      if (
-        typeof ts === "string" &&
-        !ts.endsWith("Z") &&
-        !ts.includes("+") &&
-        !ts.includes("-") &&
-        ts.length > 10
-      ) {
-        dateObj = new Date(ts + "Z");
-      } else {
-        dateObj = new Date(ts);
-      }
-      const timeStr = dateObj.toLocaleString("es-VE", {
-        timeZone: "America/Caracas",
-      });
-      const actionText =
-        internalEvent === "machine_on" ? "encendida" : "apagada";
-      const bodyParts = [`${machineRow.name}`];
-      if (machineRow.location) bodyParts.push(`• ${machineRow.location}`);
-      bodyParts.push(`${actionText} (${timeStr})`);
-      if (data?.reason) bodyParts.push(`— ${data.reason}`);
-
-      await sendNotificationToAll({
-        title:
-          internalEvent === "machine_on"
-            ? "Máquina encendida"
-            : "Máquina apagada",
-        body: bodyParts.join(" "),
-        data: {
-          machineId,
-          eventId,
-          eventType: internalEvent,
-          ...data,
-          timestamp: ts,
-        },
-      });
-    } catch (pushErr) {
-      console.error("Error enviando notificación push:", pushErr);
-    }
-  }
-
-  // Si recibimos un PING y la máquina estaba marcada como inactive,
-  // tratarlo como re-encendido automático: insertar evento machine_on,
-  // emitir por Socket.IO y enviar notificación push (fire-and-forget).
-  if (internalEvent === "ping" && machineRow.status !== "active") {
-    try {
-      const onTs = timestamp || new Date().toISOString();
-      const onRes = await pool.query(
-        "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-        [machineId, "machine_on", onTs, { auto: true, reason: "ping" }]
-      );
-      const onEventId = onRes.rows[0].id;
-      try {
-        const io = req.app.get("io");
-        if (io) {
-          try {
+        const onEventId = onRes.rows[0].id;
+        try {
+          const io = req.app.get("io");
+          if (io) {
             io.emit("machine_on", {
               machineId,
               machineName: machineRow.name,
@@ -252,59 +168,123 @@ export const receiveData = async (req: Request, res: Response) => {
             console.log(
               `Auto machine_on emitted due to ping -> machine=${machineId} eventId=${onEventId}`
             );
-          } catch (emitErr) {
-            console.error("Error emitiendo auto machine_on:", emitErr);
           }
+        } catch (emitErr) {
+          console.error("Error emitiendo auto machine_on:", emitErr);
         }
-      } catch (ioErr) {
-        console.error("Error accediendo a io para auto machine_on:", ioErr);
+
+        try {
+          const { sendNotificationToAll } = await import(
+            "../utils/pushSubscriptions"
+          );
+          await sendNotificationToAll({
+            title: "Máquina encendida",
+            body: `${machineRow.name} ${
+              machineRow.location ? `• ${machineRow.location}` : ""
+            } — reconectada`.trim(),
+            data: {
+              machineId,
+              eventId: onEventId,
+              eventType: "machine_on",
+              auto: true,
+              reason: "ping",
+              timestamp: onTs,
+            },
+          });
+        } catch (pushErr) {
+          console.error("Error enviando push auto machine_on:", pushErr);
+        }
+      } catch (err) {
+        console.error("Error insertando evento auto machine_on:", err);
+      }
+    }
+
+    // Si es evento de encendido/apagado, emitir por Socket.IO y enviar push
+    if (internalEvent === "machine_on" || internalEvent === "machine_off") {
+      const eventId = eventResult.rows[0].id;
+      try {
+        const io = req.app.get("io");
+        if (io) {
+          io.emit(internalEvent, {
+            machineId,
+            machineName: machineRow.name,
+            location: machineRow.location,
+            eventId,
+            data,
+            timestamp: timestamp || new Date().toISOString(),
+          });
+        }
+      } catch (socketErr) {
+        console.error(
+          `Error emitiendo evento ${internalEvent} por Socket.IO:`,
+          socketErr
+        );
       }
 
       try {
         const { sendNotificationToAll } = await import(
           "../utils/pushSubscriptions"
         );
-        (async () => {
-          try {
-            await sendNotificationToAll({
-              title: "Máquina encendida",
-              body: `${machineRow.name} ${
-                machineRow.location ? `• ${machineRow.location}` : ""
-              } — reconectada`.trim(),
-              data: {
-                machineId,
-                eventId: onEventId,
-                eventType: "machine_on",
-                auto: true,
-                reason: "ping",
-                timestamp: onTs,
-              },
-            });
-          } catch (pushErr) {
-            console.error("Error enviando push auto machine_on:", pushErr);
-          }
-        })();
-      } catch (pushInitErr) {
-        console.error("Error iniciando push auto machine_on:", pushInitErr);
+        const ts = timestamp || new Date().toISOString();
+        // Asegura que el timestamp se interprete como UTC si no tiene zona
+        let dateObj: Date;
+        if (
+          typeof ts === "string" &&
+          !ts.endsWith("Z") &&
+          !ts.includes("+") &&
+          !ts.includes("-") &&
+          ts.length > 10
+        ) {
+          dateObj = new Date(ts + "Z");
+        } else {
+          dateObj = new Date(ts);
+        }
+        const timeStr = dateObj.toLocaleString("es-VE", {
+          timeZone: "America/Caracas",
+        });
+        const actionText =
+          internalEvent === "machine_on" ? "encendida" : "apagada";
+        const bodyParts = [`${machineRow.name}`];
+        if (machineRow.location) bodyParts.push(`• ${machineRow.location}`);
+        bodyParts.push(`${actionText} (${timeStr})`);
+        if (data?.reason) bodyParts.push(`— ${data.reason}`);
+
+        await sendNotificationToAll({
+          title:
+            internalEvent === "machine_on"
+              ? "Máquina encendida"
+              : "Máquina apagada",
+          body: bodyParts.join(" "),
+          data: {
+            machineId,
+            eventId,
+            eventType: internalEvent,
+            ...data,
+            timestamp: ts,
+          },
+        });
+      } catch (pushErr) {
+        console.error("Error enviando notificación push:", pushErr);
       }
-    } catch (err) {
-      console.error("Error insertando evento auto machine_on:", err);
     }
-  }
 
-  // Only log important events to keep logs clean (coins / on / off)
-  // Only log important events to keep logs clean (coins / on / off / ping)
-  const shouldLogEvent = [
-    "coin_inserted",
-    "machine_on",
-    "machine_off",
-    "ping",
-  ].includes(internalEvent);
+    // Only log important events to keep logs clean (coins / on / off / ping)
+    const shouldLogEvent = [
+      "coin_inserted",
+      "machine_on",
+      "machine_off",
+      "ping",
+    ].includes(internalEvent);
 
-  if (shouldLogEvent) {
-    console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
+    if (shouldLogEvent) {
+      console.log(`IoT Event: ${machineId} - ${internalEvent}`, data);
+    }
+
+    return res.status(200).json({ status: "ok" });
+  } catch (err) {
+    console.error("Error en receiveData:", err);
+    res.status(500).json({ message: "Server error" });
   }
-  res.status(200).json({ status: "ok" });
 };
 
 export const getEvents = async (req: Request, res: Response) => {
