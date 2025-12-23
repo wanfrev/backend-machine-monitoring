@@ -156,11 +156,21 @@ export const updateMachine = async (req: Request, res: Response) => {
     });
     console.log("[updateMachine] existing machine:", existing);
 
-    // Infer old and new type (Boxeo vs Agilidad) — backend historically infers type from name
+    // Infer types: use existing.id to determine current group (more reliable than name)
+    const inferTypeFromId = (idStr: string) =>
+      idStr && idStr.includes("Maquina_Boxeo_") ? "Boxeo" : "Agilidad";
     const inferTypeFromName = (n: string) =>
       n && n.startsWith("Boxeo") ? "Boxeo" : "Agilidad";
-    const oldType = inferTypeFromName(existing.name || "");
+
+    const oldType = inferTypeFromId(existing.id || "");
     const newType = type || (name ? inferTypeFromName(name) : oldType);
+
+    console.log(
+      "[updateMachine] inferred oldType from id:",
+      oldType,
+      "newType from payload/name:",
+      newType
+    );
 
     // If type group didn't change, just update fields normally
     if (newType === oldType) {
