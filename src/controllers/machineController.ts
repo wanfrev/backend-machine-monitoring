@@ -104,11 +104,20 @@ export const getMachineById = (req: Request, res: Response) => {
 };
 
 export const createMachine = async (req: Request, res: Response) => {
-  const { name, location, id } = req.body;
+  const { name, location, id, type } = req.body;
   if (!name) return res.status(400).json({ message: "Name is required" });
 
   try {
-    const machineId: string = id || (await generateSequentialId(name));
+    let machineId: string;
+    if (id) {
+      machineId = id;
+    } else if (type) {
+      // Prefer explicit type when provided
+      const desiredNameForGeneration = type === "Boxeo" ? "Boxeo" : "Agilidad";
+      machineId = await generateSequentialId(desiredNameForGeneration);
+    } else {
+      machineId = await generateSequentialId(name);
+    }
 
     const result = await pool.query(
       "INSERT INTO machines (id, name, status, location, last_ping) VALUES ($1, $2, $3, $4, $5) RETURNING *",
@@ -122,23 +131,76 @@ export const createMachine = async (req: Request, res: Response) => {
   }
 };
 
-export const updateMachine = (req: Request, res: Response) => {
+export const updateMachine = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, location, status } = req.body;
-  pool
-    .query(
-      "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status) WHERE id = $4 RETURNING *",
-      [name, location, status, id]
-    )
-    .then((result) => {
-      if (result.rowCount === 0)
-        return res.status(404).json({ message: "Machine not found" });
-      res.json(result.rows[0]);
-    })
-    .catch((err) => {
-      console.error("Error updating machine:", err);
-      res.status(500).json({ message: "Server error" });
-    });
+  const { name, location, status, type } = req.body;
+
+  const client = await pool.connect();
+  try {
+    // Fetch existing machine
+    const existingRes = await client.query(
+      "SELECT * FROM machines WHERE id = $1",
+      [id]
+    );
+    if (existingRes.rowCount === 0) {
+      return res.status(404).json({ message: "Machine not found" });
+    }
+    const existing = existingRes.rows[0] as Machine;
+
+    // Infer old and new type (Boxeo vs Agilidad) — backend historically infers type from name
+    const inferTypeFromName = (n: string) =>
+      n && n.startsWith("Boxeo") ? "Boxeo" : "Agilidad";
+    const oldType = inferTypeFromName(existing.name || "");
+    const newType = type || (name ? inferTypeFromName(name) : oldType);
+
+    // If type group didn't change, just update fields normally
+    if (newType === oldType) {
+      const result = await client.query(
+        "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status) WHERE id = $4 RETURNING *",
+        [name, location, status, id]
+      );
+      return res.json(result.rows[0]);
+    }
+
+    // Type group changed: need to generate a new sequential id and migrate related rows
+    // Generate a new id based on the (new) type
+    const desiredNameForGeneration = newType === "Boxeo" ? "Boxeo" : "Agilidad";
+    const newId = await generateSequentialId(desiredNameForGeneration);
+
+    await client.query("BEGIN");
+    // Insert a new machine row with new id and updated fields
+    await client.query(
+      "INSERT INTO machines (id, name, status, location, last_ping) SELECT $1, COALESCE($2, name), COALESCE($3, status), COALESCE($4, location), last_ping FROM machines WHERE id = $5",
+      [newId, name, status, location, id]
+    );
+
+    // Migrate referencing rows to point to the new id
+    await client.query(
+      "UPDATE machine_events SET machine_id = $1 WHERE machine_id = $2",
+      [newId, id]
+    );
+    await client.query(
+      "UPDATE coins SET machine_id = $1 WHERE machine_id = $2",
+      [newId, id]
+    );
+
+    // Delete old machine row
+    await client.query("DELETE FROM machines WHERE id = $1", [id]);
+
+    await client.query("COMMIT");
+
+    // Return newly inserted machine
+    const fresh = await client.query("SELECT * FROM machines WHERE id = $1", [
+      newId,
+    ]);
+    res.json(fresh.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Error updating machine:", err);
+    res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
+  }
 };
 
 export const deleteMachine = async (req: Request, res: Response) => {
