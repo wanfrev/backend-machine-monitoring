@@ -340,7 +340,20 @@ export const getEvents = async (req: Request, res: Response) => {
       where.push(`timestamp >= $${params.length}`);
     }
     if (endDate) {
-      params.push(String(endDate));
+      // Add a small buffer to endDate to avoid excluding events that
+      // occurred a few milliseconds after the provided endDate due to
+      // clock differences or timestamp rounding on clients.
+      try {
+        const e = new Date(String(endDate));
+        if (!Number.isNaN(e.getTime())) {
+          e.setMilliseconds(e.getMilliseconds() + 1000); // +1s buffer
+          params.push(e.toISOString());
+        } else {
+          params.push(String(endDate));
+        }
+      } catch (e) {
+        params.push(String(endDate));
+      }
       where.push(`timestamp <= $${params.length}`);
     }
 
