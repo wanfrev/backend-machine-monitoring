@@ -313,20 +313,59 @@ export const getEvents = async (req: Request, res: Response) => {
 
     // Si envían startDate/endDate explícitos, usar esos (anulan range)
     if (startDate) {
-      params.push(String(startDate));
+      // Normalize startDate: accept both full ISO and date-only (YYYY-MM-DD).
+      try {
+        const raw = String(startDate);
+        const parts = raw.split("-").map(Number);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && parts.length === 3) {
+          // Treat date-only as local start of day to avoid timezone-shift bugs
+          const s = new Date(
+            parts[0],
+            (parts[1] || 1) - 1,
+            parts[2],
+            0,
+            0,
+            0,
+            0
+          );
+          params.push(s.toISOString());
+        } else {
+          const s = new Date(raw);
+          if (!Number.isNaN(s.getTime())) params.push(s.toISOString());
+          else params.push(raw);
+        }
+      } catch (err) {
+        params.push(String(startDate));
+      }
       where.push(`timestamp >= $${params.length}`);
     }
     if (endDate) {
-      // Add a small buffer to endDate to avoid excluding events that
-      // occurred a few milliseconds after the provided endDate due to
-      // clock differences or timestamp rounding on clients.
+      // Normalize endDate similarly and include end-of-day (local) so that
+      // selecting the same day for from/to returns that day's events.
       try {
-        const e = new Date(String(endDate));
-        if (!Number.isNaN(e.getTime())) {
-          e.setMilliseconds(e.getMilliseconds() + 1000); // +1s buffer
-          params.push(e.toISOString());
+        const raw = String(endDate);
+        const parts = raw.split("-").map(Number);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && parts.length === 3) {
+          const t = new Date(
+            parts[0],
+            (parts[1] || 1) - 1,
+            parts[2],
+            23,
+            59,
+            59,
+            999
+          );
+          // small buffer to tolerate clock skew
+          t.setMilliseconds(t.getMilliseconds() + 1000);
+          params.push(t.toISOString());
         } else {
-          params.push(String(endDate));
+          const e = new Date(raw);
+          if (!Number.isNaN(e.getTime())) {
+            e.setMilliseconds(e.getMilliseconds() + 1000);
+            params.push(e.toISOString());
+          } else {
+            params.push(raw);
+          }
         }
       } catch (e) {
         params.push(String(endDate));
