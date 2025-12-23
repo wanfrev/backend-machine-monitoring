@@ -103,10 +103,6 @@ export const receiveData = async (req: Request, res: Response) => {
         const io = req.app.get("io");
         if (io) {
           try {
-            console.log(
-              `Emitiendo socket coin_inserted -> machine=${machineId} eventId=${eventId}`
-            );
-            const emitStart = Date.now();
             io.emit("coin_inserted", {
               machineId,
               machineName: machineRow.name,
@@ -115,11 +111,6 @@ export const receiveData = async (req: Request, res: Response) => {
               amount: data.cantidad ?? 1,
               timestamp: timestamp || new Date().toISOString(),
             });
-            console.log(
-              `Emitido coin_inserted (took ${
-                Date.now() - emitStart
-              }ms) -> machine=${machineId}`
-            );
           } catch (e) {
             console.error("Error emitiendo coin_inserted:", e);
           }
@@ -151,11 +142,6 @@ export const receiveData = async (req: Request, res: Response) => {
                 timestamp: timestamp || new Date().toISOString(),
               },
             });
-            console.log(
-              `Push notifications sent (took ${
-                Date.now() - start
-              }ms) for machine=${machineId}`
-            );
           } catch (err) {
             console.error(
               "Error enviando notificación push (background):",
