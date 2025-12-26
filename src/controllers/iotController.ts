@@ -3,8 +3,8 @@ import { pool } from "../db";
 import { MachineEvent } from "../models/types";
 
 const HEARTBEAT_TIMEOUT_MS = Number(
-  process.env.HEARTBEAT_TIMEOUT_MS || 1 * 60 * 1000
-); // 1 minuto
+  process.env.HEARTBEAT_TIMEOUT_MS || 2 * 60 * 1000
+); // 2 minutos
 
 export const receiveData = async (req: Request, res: Response) => {
   try {
