@@ -3,6 +3,33 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
+    // Normalize and validate date query params to avoid passing invalid values
+    // Accept either full date `YYYY-MM-DD` or month `YYYY-MM` (convert to month bounds).
+    const asString = (v: any) => (typeof v === "string" ? v.trim() : "");
+    let sd = asString(startDate) || null;
+    let ed = asString(endDate) || null;
+
+    const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const isYm = (s: string) => /^\d{4}-\d{2}$/.test(s);
+    const daysInMonth = (y: number, m: number) => new Date(y, m, 0).getDate();
+
+    if (sd && isYm(sd)) {
+      // convert YYYY-MM -> YYYY-MM-01
+      sd = `${sd}-01`;
+    } else if (sd && !isYmd(sd)) {
+      sd = null;
+    }
+
+    if (ed && isYm(ed)) {
+      // convert YYYY-MM -> last day of month
+      const parts = ed.split("-").map((p) => Number(p));
+      const y = parts[0] || 0;
+      const m = parts[1] || 1;
+      const last = daysInMonth(y, m);
+      ed = `${ed}-${String(last).padStart(2, "0")}`;
+    } else if (ed && !isYmd(ed)) {
+      ed = null;
+    }
     // Usar la tabla coins para contar monedas por día en zona horaria local.
     // Cada registro en coins representa una moneda insertada.
     // Ajustar aquí la zona horaria a la de tus máquinas/negocio.
@@ -16,7 +43,7 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
       GROUP BY DATE(timestamp AT TIME ZONE 'America/Caracas')
       ORDER BY DATE(timestamp AT TIME ZONE 'America/Caracas')`,
-      [id, startDate || null, endDate || null]
+      [id, sd || null, ed || null]
     );
     res.json(
       result.rows.map((r: any) => ({ date: r.date, income: Number(r.income) }))
