@@ -317,14 +317,20 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
     let lastOnIndex: number | null = null;
 
     // Helper: normalize various timestamp formats into an ISO UTC string
-    const normalizeToIsoUtc = (v: any) => {
-      if (!v) return null;
+    const normalizeToIsoUtc = (v: any): string => {
+      if (!v) return new Date().toISOString();
       if (v instanceof Date) return v.toISOString();
       const s = String(v);
       // If the string already contains timezone info, trust it
-      if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) return s;
+      if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) {
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) return d.toISOString();
+      }
       // Otherwise assume the stored value is naive and append Z to treat as UTC
-      return s + "Z";
+      const maybe = s + "Z";
+      const d2 = new Date(maybe);
+      if (!Number.isNaN(d2.getTime())) return d2.toISOString();
+      return new Date().toISOString();
     };
 
     for (const row of rows) {
