@@ -293,13 +293,14 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
+    // Use a consistent timezone when filtering by date to avoid day-shifts
     const result = await pool.query(
       `SELECT type, timestamp
        FROM machine_events
        WHERE machine_id = $1
          AND type IN ('machine_on', 'machine_off')
-         AND ($2::date IS NULL OR DATE(timestamp) >= $2::date)
-         AND ($3::date IS NULL OR DATE(timestamp) <= $3::date)
+         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
+         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
        ORDER BY timestamp ASC`,
       [id, startDate || null, endDate || null]
     );
@@ -315,8 +316,19 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
     const logs: Log[] = [];
     let lastOnIndex: number | null = null;
 
+    // Helper: normalize various timestamp formats into an ISO UTC string
+    const normalizeToIsoUtc = (v: any) => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString();
+      const s = String(v);
+      // If the string already contains timezone info, trust it
+      if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) return s;
+      // Otherwise assume the stored value is naive and append Z to treat as UTC
+      return s + "Z";
+    };
+
     for (const row of rows) {
-      const tsIso = new Date(row.timestamp).toISOString();
+      const tsIso = normalizeToIsoUtc(row.timestamp);
       if (row.type === "machine_on") {
         logs.push({ event: "Encendido", ts: tsIso, dur: null });
         lastOnIndex = logs.length - 1;
