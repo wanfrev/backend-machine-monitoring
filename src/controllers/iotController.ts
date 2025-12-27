@@ -67,6 +67,40 @@ export const receiveData = async (req: Request, res: Response) => {
       data.cantidad = cantidadFinal;
     }
 
+    // Normalize incoming timestamp values to ISO UTC.
+    const TZ_OFFSET_HOURS = -4; // America/Caracas (no DST currently)
+    const normalizeTimestamp = (v: any) => {
+      if (!v) return new Date().toISOString();
+      if (v instanceof Date) return v.toISOString();
+      const s = String(v).trim();
+      if (s === "") return new Date().toISOString();
+      // If already contains timezone info, trust JS Date to parse it
+      if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) {
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) return d.toISOString();
+      }
+      // Try parse common formats like YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM
+      const m = s.match(
+        /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+      );
+      if (m) {
+        const y = Number(m[1]);
+        const mo = Number(m[2]);
+        const d = Number(m[3]);
+        const hh = Number(m[4] || 0);
+        const mm = Number(m[5] || 0);
+        const ss = Number(m[6] || 0);
+        // Treat parsed components as America/Caracas local time (UTC-4)
+        const utcMs =
+          Date.UTC(y, mo - 1, d, hh, mm, ss) - TZ_OFFSET_HOURS * 3600 * 1000;
+        return new Date(utcMs).toISOString();
+      }
+      // Fallback: let Date try to parse and convert to ISO
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
+      return new Date().toISOString();
+    };
+
     // Actualizar status y last_ping de la máquina.
     const now = new Date();
     const machineRow = machineResult.rows[0];
@@ -79,13 +113,14 @@ export const receiveData = async (req: Request, res: Response) => {
 
     await pool.query(
       "UPDATE machines SET last_ping = $1, status = $2 WHERE id = $3",
-      [now, newStatus, machineId]
+      [now.toISOString(), newStatus, machineId]
     );
 
     // Insertar evento
+    const normalizedTs = normalizeTimestamp(timestamp);
     const eventResult = await pool.query(
       "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-      [machineId, internalEvent, timestamp || new Date().toISOString(), data]
+      [machineId, internalEvent, normalizedTs, data]
     );
 
     // Si es evento de moneda, insertar en coins
@@ -109,7 +144,7 @@ export const receiveData = async (req: Request, res: Response) => {
               location: machineRow.location,
               eventId,
               amount: data.cantidad ?? 1,
-              timestamp: timestamp || new Date().toISOString(),
+              timestamp: normalizedTs,
             });
           }
         } catch (socketErr) {
@@ -132,7 +167,7 @@ export const receiveData = async (req: Request, res: Response) => {
               machineId,
               eventId,
               amount: data.cantidad ?? 1,
-              timestamp: timestamp || new Date().toISOString(),
+              timestamp: normalizedTs,
             },
           });
         } catch (pushErr) {
@@ -148,7 +183,7 @@ export const receiveData = async (req: Request, res: Response) => {
     // emitir por Socket.IO y enviar notificación push (fire-and-forget).
     if (internalEvent === "ping" && machineRow.status !== "active") {
       try {
-        const onTs = timestamp || new Date().toISOString();
+        const onTs = normalizeTimestamp(timestamp);
         const onRes = await pool.query(
           "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
           [machineId, "machine_on", onTs, { auto: true, reason: "ping" }]
@@ -211,7 +246,7 @@ export const receiveData = async (req: Request, res: Response) => {
             location: machineRow.location,
             eventId,
             data,
-            timestamp: timestamp || new Date().toISOString(),
+            timestamp: normalizedTs,
           });
         }
       } catch (socketErr) {
@@ -225,7 +260,7 @@ export const receiveData = async (req: Request, res: Response) => {
         const { sendNotificationToAll } = await import(
           "../utils/pushSubscriptions"
         );
-        const ts = timestamp || new Date().toISOString();
+        const ts = normalizedTs;
         // Asegura que el timestamp se interprete como UTC si no tiene zona
         let dateObj: Date;
         if (
