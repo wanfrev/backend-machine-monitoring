@@ -62,7 +62,7 @@ export const receiveData = async (req: Request, res: Response) => {
     if (rawData && typeof rawData.cantidad !== "undefined") {
       cantidadFinal = rawData.cantidad;
     }
-    const data: any = { ...(rawData || {}) };
+    let data: any = { ...(rawData || {}) };
     if (typeof cantidadFinal !== "undefined") {
       data.cantidad = cantidadFinal;
     }
@@ -116,6 +116,11 @@ export const receiveData = async (req: Request, res: Response) => {
       [now.toISOString(), newStatus, machineId]
     );
 
+    // Mark event as test if the machine is in test_mode (don't count coins)
+    if (machineRow.test_mode) {
+      data = { ...(data || {}), test: true };
+    }
+
     // Insertar evento
     const normalizedTs = normalizeTimestamp(timestamp);
     const eventResult = await pool.query(
@@ -127,13 +132,18 @@ export const receiveData = async (req: Request, res: Response) => {
     if (internalEvent === "coin_inserted") {
       const eventId = eventResult.rows[0].id;
       try {
-        await pool.query(
-          "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
-          [machineId, eventId]
-        );
-        console.log(
-          `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
-        );
+        // If machine is in test mode, do not persist a coins row (ghost coin)
+        if (!machineRow.test_mode) {
+          await pool.query(
+            "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
+            [machineId, eventId]
+          );
+          console.log(
+            `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
+          );
+        } else {
+          console.log(`Coin en modo prueba ignorada en coins table: machine_id=${machineId}, event_id=${eventId}`);
+        }
 
         try {
           const io = req.app.get("io");
@@ -145,6 +155,7 @@ export const receiveData = async (req: Request, res: Response) => {
               eventId,
               amount: data.cantidad ?? 1,
               timestamp: normalizedTs,
+              test: !!machineRow.test_mode,
             });
           }
         } catch (socketErr) {

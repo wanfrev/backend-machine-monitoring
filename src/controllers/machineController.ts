@@ -377,7 +377,7 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
 export const getMachineStats = (req: Request, res: Response) => {
   const { id } = req.params;
   pool
-    .query("SELECT * FROM machine_events WHERE machine_id = $1", [id])
+    .query("SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')", [id])
     .then((result) => {
       const events = result.rows;
       const totalIncome = events
@@ -401,10 +401,11 @@ export const getMachineStats = (req: Request, res: Response) => {
 export const getTotalCoins = async (req: Request, res: Response) => {
   try {
     console.log("[GET] /api/machines/coins/total");
+    // Count persisted coins (we avoid inserting coins for machines in test_mode)
     const result = await pool.query(
-      "SELECT COALESCE(SUM((data->>'cantidad')::int), 0) AS total_coins FROM machine_events WHERE type = 'coin_inserted'"
+      "SELECT COUNT(*) AS total_coins FROM coins"
     );
-    const totalCoins = result.rows[0]?.total_coins ?? 0;
+    const totalCoins = Number(result.rows[0]?.total_coins ?? 0);
     console.log("Total coins computed:", totalCoins);
     res.json({ totalCoins });
   } catch (err) {
