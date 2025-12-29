@@ -426,6 +426,9 @@ export const getEvents = async (req: Request, res: Response) => {
       where.push("type <> 'ping'");
     }
 
+    // Por defecto no incluir eventos marcados como prueba
+    where.push("NOT (data->>'test' = 'true')");
+
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const p = Math.max(1, Number(page) || 1);
