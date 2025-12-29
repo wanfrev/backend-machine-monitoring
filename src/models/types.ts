@@ -17,6 +17,7 @@ export interface Machine {
   status: "active" | "inactive" | "maintenance";
   location?: string;
   lastPing?: Date;
+  test_mode?: boolean;
 }
 
 export interface MachineEvent {

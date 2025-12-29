@@ -160,7 +160,7 @@ export const createMachine = async (req: Request, res: Response) => {
 
 export const updateMachine = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, location, status, type } = req.body;
+  const { name, location, status, type, test_mode } = req.body;
 
   const client = await pool.connect();
   try {
@@ -180,6 +180,7 @@ export const updateMachine = async (req: Request, res: Response) => {
       location,
       status,
       type,
+      test_mode,
     });
     console.log("[updateMachine] existing machine:", existing);
 
@@ -202,8 +203,14 @@ export const updateMachine = async (req: Request, res: Response) => {
     // If type group didn't change, just update fields normally
     if (newType === oldType) {
       const result = await client.query(
-        "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status) WHERE id = $4 RETURNING *",
-        [name, location, status, id]
+        "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status), test_mode = COALESCE($4, test_mode) WHERE id = $5 RETURNING *",
+        [
+          name,
+          location,
+          status,
+          typeof test_mode === "undefined" ? null : test_mode,
+          id,
+        ]
       );
       return res.json(result.rows[0]);
     }
@@ -216,8 +223,15 @@ export const updateMachine = async (req: Request, res: Response) => {
     await client.query("BEGIN");
     // Insert a new machine row with new id and updated fields
     await client.query(
-      "INSERT INTO machines (id, name, status, location, last_ping) SELECT $1, COALESCE($2, name), COALESCE($3, status), COALESCE($4, location), last_ping FROM machines WHERE id = $5",
-      [newId, name, status, location, id]
+      "INSERT INTO machines (id, name, status, location, last_ping, test_mode) SELECT $1, COALESCE($2, name), COALESCE($3, status), COALESCE($4, location), last_ping, COALESCE($6, test_mode) FROM machines WHERE id = $5",
+      [
+        newId,
+        name,
+        status,
+        location,
+        id,
+        typeof test_mode === "undefined" ? null : test_mode,
+      ]
     );
 
     // Migrate referencing rows to point to the new id
