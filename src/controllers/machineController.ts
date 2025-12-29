@@ -287,12 +287,11 @@ export const getMachineHistory = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       `SELECT *
-         FROM machine_events
-         WHERE machine_id = $1
-           AND NOT (data->>'test' = 'true')
-           AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
-           AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
-         ORDER BY timestamp DESC`,
+       FROM machine_events
+       WHERE machine_id = $1
+         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
+         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
+       ORDER BY timestamp DESC`,
       [id, startDate || null, endDate || null]
     );
 
@@ -378,10 +377,7 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
 export const getMachineStats = (req: Request, res: Response) => {
   const { id } = req.params;
   pool
-    .query(
-      "SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')",
-      [id]
-    )
+    .query("SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')", [id])
     .then((result) => {
       const events = result.rows;
       const totalIncome = events
