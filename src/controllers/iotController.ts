@@ -142,7 +142,9 @@ export const receiveData = async (req: Request, res: Response) => {
             `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
           );
         } else {
-          console.log(`Coin en modo prueba ignorada en coins table: machine_id=${machineId}, event_id=${eventId}`);
+          console.log(
+            `Coin en modo prueba ignorada en coins table: machine_id=${machineId}, event_id=${eventId}`
+          );
         }
 
         try {
