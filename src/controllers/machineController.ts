@@ -285,13 +285,17 @@ export const getMachineHistory = async (req: Request, res: Response) => {
   const { startDate, endDate } = req.query;
 
   try {
+    // Return machine events but only include coin events that have a corresponding
+    // row in the `coins` table (i.e. real/recorded coins). This preserves
+    // device-sent historical events while ensuring the UI shows only real coins.
     const result = await pool.query(
-      `SELECT *
-       FROM machine_events
-       WHERE machine_id = $1
-         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
-         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
-       ORDER BY timestamp DESC`,
+      `SELECT me.*
+       FROM machine_events me
+       WHERE me.machine_id = $1
+         AND (me.type <> 'coin_inserted' OR EXISTS (SELECT 1 FROM coins c WHERE c.event_id = me.id))
+         AND ($2::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
+         AND ($3::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
+       ORDER BY me.timestamp DESC`,
       [id, startDate || null, endDate || null]
     );
 
@@ -376,26 +380,33 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
 
 export const getMachineStats = (req: Request, res: Response) => {
   const { id } = req.params;
-  pool
-    .query("SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')", [id])
-    .then((result) => {
-      const events = result.rows;
-      const totalIncome = events
-        .filter((e) => e.type === "coin_inserted")
-        .reduce((sum, e) => sum + (e.data?.amount || 0), 0);
+  (async () => {
+    try {
+      // Fetch non-test events for computing sessions/scores
+      const eventsRes = await pool.query(
+        "SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')",
+        [id]
+      );
+      const events = eventsRes.rows;
+
+      // Compute totalIncome from the persisted `coins` table so only real coins are counted
+      const coinsRes = await pool.query(
+        "SELECT COUNT(*) AS cnt FROM coins WHERE machine_id = $1",
+        [id]
+      );
+      const totalIncome = Number(coinsRes.rows[0]?.cnt ?? 0);
+
       const totalScore = events
         .filter((e) => e.type === "game_end")
         .reduce((sum, e) => sum + (e.data?.score || 0), 0);
-      const activeSessions = events.filter(
-        (e) => e.type === "game_start"
-      ).length;
+      const activeSessions = events.filter((e) => e.type === "game_start").length;
       const usageRate = events.length > 0 ? 45.5 : 0;
       res.json({ totalIncome, totalScore, activeSessions, usageRate });
-    })
-    .catch((err) => {
+    } catch (err) {
       console.error("Error fetching machine stats:", err);
       res.status(500).json({ message: "Server error" });
-    });
+    }
+  })();
 };
 
 export const getTotalCoins = async (req: Request, res: Response) => {
