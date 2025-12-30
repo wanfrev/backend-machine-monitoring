@@ -121,8 +121,67 @@ export const receiveData = async (req: Request, res: Response) => {
       data = { ...(data || {}), test: true };
     }
 
-    // Insertar evento
+    // Normalize timestamp for the incoming event early so we can use it for dedupe checks
     const normalizedTs = normalizeTimestamp(timestamp);
+
+    // --- Deduplication / idempotency for coin events ---
+    // Prefer an explicit `id_unico` sent by the device. If provided,
+    // ignore duplicates that already have a machine_events row with the same id.
+    // If no id is provided, use a short time-window based dedupe (CONFIG: COIN_DEDUP_MS)
+    const COIN_DEDUP_MS = Number(process.env.COIN_DEDUP_MS || 3000);
+    // Ensure any top-level id_unico is available inside data for persistence and queries
+    const incomingUniqueId =
+      (req.body && (req.body.id_unico || req.body.idUnique)) ||
+      data?.id_unico ||
+      data?.idUnique;
+    if (internalEvent === "coin_inserted") {
+      if (incomingUniqueId) {
+        const dupCheck = await pool.query(
+          `SELECT id FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' AND (data->>'id_unico') = $2 LIMIT 1`,
+          [machineId, String(incomingUniqueId)]
+        );
+        if (dupCheck.rowCount > 0) {
+          console.log(
+            `Ignored duplicate coin (id_unico=${incomingUniqueId}) for machine=${machineId}`
+          );
+          return res.status(200).json({
+            status: "ok",
+            ignored: "duplicate",
+            id_unico: incomingUniqueId,
+          });
+        }
+        // ensure the id is present inside the data object we persist
+        data = { ...(data || {}), id_unico: incomingUniqueId };
+      } else {
+        // time-window dedupe: ignore if last coin_inserted for this machine is very recent
+        try {
+          const lastRes = await pool.query(
+            "SELECT timestamp FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' ORDER BY timestamp DESC LIMIT 1",
+            [machineId]
+          );
+          if (lastRes.rowCount > 0) {
+            const lastTs = new Date(lastRes.rows[0].timestamp).getTime();
+            const newTs = new Date(normalizedTs).getTime();
+            if (Math.abs(newTs - lastTs) < COIN_DEDUP_MS) {
+              console.log(
+                `Ignored coin due to rate dedupe (delta=${Math.abs(
+                  newTs - lastTs
+                )}ms) for machine=${machineId}`
+              );
+              return res.status(200).json({
+                status: "ok",
+                ignored: "rate_limit",
+                deltaMs: Math.abs(newTs - lastTs),
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Error during coin dedupe check:", e);
+        }
+      }
+    }
+
+    // Insertar evento
     const eventResult = await pool.query(
       "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
       [machineId, internalEvent, normalizedTs, data]
@@ -139,13 +198,22 @@ export const receiveData = async (req: Request, res: Response) => {
             `Coin ignorada (test_mode=${!!machineRow.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`
           );
         } else {
-          await pool.query(
-            "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
-            [machineId, eventId]
+          // Persist coin and include unique_id when available to enforce idempotency at DB level.
+          const uniqueIdForCoin =
+            (data && (data.id_unico || data.idUnique)) || null;
+          const insertRes = await pool.query(
+            "INSERT INTO coins (machine_id, event_id, unique_id) VALUES ($1, $2, $3) ON CONFLICT (machine_id, unique_id) DO NOTHING RETURNING id",
+            [machineId, eventId, uniqueIdForCoin]
           );
-          console.log(
-            `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
-          );
+          if (insertRes.rowCount === 0) {
+            console.log(
+              `Coin duplicada ignorada por ON CONFLICT: machine_id=${machineId}, unique_id=${uniqueIdForCoin}, event_id=${eventId}`
+            );
+          } else {
+            console.log(
+              `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
+            );
+          }
 
           try {
             const io = req.app.get("io");

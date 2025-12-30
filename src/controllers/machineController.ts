@@ -399,7 +399,9 @@ export const getMachineStats = (req: Request, res: Response) => {
       const totalScore = events
         .filter((e) => e.type === "game_end")
         .reduce((sum, e) => sum + (e.data?.score || 0), 0);
-      const activeSessions = events.filter((e) => e.type === "game_start").length;
+      const activeSessions = events.filter(
+        (e) => e.type === "game_start"
+      ).length;
       const usageRate = events.length > 0 ? 45.5 : 0;
       res.json({ totalIncome, totalScore, activeSessions, usageRate });
     } catch (err) {
