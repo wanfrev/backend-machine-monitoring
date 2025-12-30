@@ -132,8 +132,13 @@ export const receiveData = async (req: Request, res: Response) => {
     if (internalEvent === "coin_inserted") {
       const eventId = eventResult.rows[0].id;
       try {
-        // If machine is in test mode, do not persist a coins row (ghost coin)
-        if (!machineRow.test_mode) {
+        // Do not persist coins if the machine is in test_mode
+        // or if the machine was not marked as active (likely a startup ghost coin).
+        if (machineRow.test_mode || machineRow.status !== "active") {
+          console.log(
+            `Coin ignorada (test_mode=${!!machineRow.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`
+          );
+        } else {
           await pool.query(
             "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2)",
             [machineId, eventId]
@@ -141,48 +146,46 @@ export const receiveData = async (req: Request, res: Response) => {
           console.log(
             `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
           );
-        } else {
-          console.log(`Coin en modo prueba ignorada en coins table: machine_id=${machineId}, event_id=${eventId}`);
-        }
 
-        try {
-          const io = req.app.get("io");
-          if (io) {
-            io.emit("coin_inserted", {
-              machineId,
-              machineName: machineRow.name,
-              location: machineRow.location,
-              eventId,
-              amount: data.cantidad ?? 1,
-              timestamp: normalizedTs,
-              test: !!machineRow.test_mode,
-            });
+          try {
+            const io = req.app.get("io");
+            if (io) {
+              io.emit("coin_inserted", {
+                machineId,
+                machineName: machineRow.name,
+                location: machineRow.location,
+                eventId,
+                amount: data.cantidad ?? 1,
+                timestamp: normalizedTs,
+                test: !!machineRow.test_mode,
+              });
+            }
+          } catch (socketErr) {
+            console.error(
+              "Error emitiendo evento coin_inserted por Socket.IO:",
+              socketErr
+            );
           }
-        } catch (socketErr) {
-          console.error(
-            "Error emitiendo evento coin_inserted por Socket.IO:",
-            socketErr
-          );
-        }
 
-        try {
-          const { sendNotificationToAll } = await import(
-            "../utils/pushSubscriptions"
-          );
-          await sendNotificationToAll({
-            title: "Moneda ingresada",
-            body: `${machineRow.name} ${
-              machineRow.location ? `• ${machineRow.location}` : ""
-            }`.trim(),
-            data: {
-              machineId,
-              eventId,
-              amount: data.cantidad ?? 1,
-              timestamp: normalizedTs,
-            },
-          });
-        } catch (pushErr) {
-          console.error("Error enviando notificación push:", pushErr);
+          try {
+            const { sendNotificationToAll } = await import(
+              "../utils/pushSubscriptions"
+            );
+            await sendNotificationToAll({
+              title: "Moneda ingresada",
+              body: `${machineRow.name} ${
+                machineRow.location ? `• ${machineRow.location}` : ""
+              }`.trim(),
+              data: {
+                machineId,
+                eventId,
+                amount: data.cantidad ?? 1,
+                timestamp: normalizedTs,
+              },
+            });
+          } catch (pushErr) {
+            console.error("Error enviando notificación push:", pushErr);
+          }
         }
       } catch (err) {
         console.error("Error insertando en coins:", err);
