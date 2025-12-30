@@ -202,7 +202,12 @@ export const receiveData = async (req: Request, res: Response) => {
           const uniqueIdForCoin =
             (data && (data.id_unico || data.idUnique)) || null;
           const insertRes = await pool.query(
-            "INSERT INTO coins (machine_id, event_id, unique_id) VALUES ($1, $2, $3) ON CONFLICT (machine_id, unique_id) DO NOTHING RETURNING id",
+            `INSERT INTO coins (machine_id, event_id, unique_id)
+             SELECT $1, $2, $3
+             WHERE $3 IS NULL OR NOT EXISTS (
+               SELECT 1 FROM coins WHERE machine_id = $1 AND unique_id = $3
+             )
+             RETURNING id`,
             [machineId, eventId, uniqueIdForCoin]
           );
           if (insertRes.rowCount === 0) {
