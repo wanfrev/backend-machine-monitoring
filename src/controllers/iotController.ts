@@ -201,34 +201,26 @@ export const receiveData = async (req: Request, res: Response) => {
           // Persist coin and include unique_id when available to enforce idempotency at DB level.
           const uniqueIdForCoin =
             (data && (data.id_unico || data.idUnique)) || null;
-          const insertRes = await pool.query(
-            `INSERT INTO coins (machine_id, event_id, unique_id)
-             SELECT $1, $2, $3
-             WHERE $3 IS NULL OR NOT EXISTS (
-               SELECT 1 FROM coins WHERE machine_id = $1 AND unique_id = $3
-             )
-             RETURNING id`,
-            [machineId, eventId, uniqueIdForCoin]
-          );
-            let insertRes;
-            if (uniqueIdForCoin == null) {
-              // No unique id: simple insert (no uniqueness check possible)
-              insertRes = await pool.query(
-                "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2) RETURNING id",
-                [String(machineId), eventId]
-              );
-            } else {
-              // With unique id: ensure we don't insert duplicates (use explicit cast)
-              insertRes = await pool.query(
-                `INSERT INTO coins (machine_id, event_id, unique_id)
-                 SELECT $1::text, $2, $3::text
-                 WHERE NOT EXISTS (
-                   SELECT 1 FROM coins WHERE machine_id = $1::text AND unique_id = $3::text
-                 )
-                 RETURNING id`,
-                [String(machineId), eventId, String(uniqueIdForCoin)]
-              );
-            }
+
+          let insertRes;
+          if (uniqueIdForCoin == null) {
+            // No unique id: simple insert (no uniqueness check possible)
+            insertRes = await pool.query(
+              "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2) RETURNING id",
+              [String(machineId), eventId]
+            );
+          } else {
+            // With unique id: ensure we don't insert duplicates (use explicit cast)
+            insertRes = await pool.query(
+              `INSERT INTO coins (machine_id, event_id, unique_id)
+               SELECT $1::text, $2, $3::text
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM coins WHERE machine_id = $1::text AND unique_id = $3::text
+               )
+               RETURNING id`,
+              [String(machineId), eventId, String(uniqueIdForCoin)]
+            );
+          }
           if (insertRes.rowCount === 0) {
             console.log(
               `Coin duplicada ignorada por ON CONFLICT: machine_id=${machineId}, unique_id=${uniqueIdForCoin}, event_id=${eventId}`
