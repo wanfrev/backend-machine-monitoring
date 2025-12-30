@@ -140,7 +140,7 @@ export const receiveData = async (req: Request, res: Response) => {
           `SELECT id FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' AND (data->>'id_unico') = $2 LIMIT 1`,
           [machineId, String(incomingUniqueId)]
         );
-        if (dupCheck.rowCount > 0) {
+        if ((dupCheck?.rowCount ?? 0) > 0) {
           console.log(
             `Ignored duplicate coin (id_unico=${incomingUniqueId}) for machine=${machineId}`
           );
@@ -159,7 +159,7 @@ export const receiveData = async (req: Request, res: Response) => {
             "SELECT timestamp FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' ORDER BY timestamp DESC LIMIT 1",
             [machineId]
           );
-          if (lastRes.rowCount > 0) {
+          if ((lastRes?.rowCount ?? 0) > 0) {
             const lastTs = new Date(lastRes.rows[0].timestamp).getTime();
             const newTs = new Date(normalizedTs).getTime();
             if (Math.abs(newTs - lastTs) < COIN_DEDUP_MS) {
