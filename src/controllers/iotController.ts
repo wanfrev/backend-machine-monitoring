@@ -191,11 +191,19 @@ export const receiveData = async (req: Request, res: Response) => {
     if (internalEvent === "coin_inserted") {
       const eventId = eventResult.rows[0].id;
       try {
+        // Refresh machine row to ensure we use the latest status/test_mode
+        // when deciding whether to persist the coin.
+        const latestMachineRes = await pool.query(
+          "SELECT status, test_mode, name, location FROM machines WHERE id = $1",
+          [machineId]
+        );
+        const latestMachine = latestMachineRes.rows[0] || machineRow;
+
         // Do not persist coins if the machine is in test_mode
         // or if the machine was not marked as active (likely a startup ghost coin).
-        if (machineRow.test_mode || machineRow.status !== "active") {
+        if (latestMachine.test_mode || latestMachine.status !== "active") {
           console.log(
-            `Coin ignorada (test_mode=${!!machineRow.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`
+            `Coin ignorada (test_mode=${!!latestMachine.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`
           );
         } else {
           // Persist coin and include unique_id when available to enforce idempotency at DB level.
