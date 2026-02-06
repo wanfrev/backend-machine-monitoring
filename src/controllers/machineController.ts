@@ -43,10 +43,10 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
       GROUP BY DATE(timestamp AT TIME ZONE 'America/Caracas')
       ORDER BY DATE(timestamp AT TIME ZONE 'America/Caracas')`,
-      [id, sd || null, ed || null]
+      [id, sd || null, ed || null],
     );
     res.json(
-      result.rows.map((r: any) => ({ date: r.date, income: Number(r.income) }))
+      result.rows.map((r: any) => ({ date: r.date, income: Number(r.income) })),
     );
   } catch (err) {
     console.error("Error fetching daily income for machine:", err);
@@ -57,7 +57,7 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
 export const getCoinsByMachine = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
-      `SELECT machine_id, COUNT(*) AS total_coins FROM coins GROUP BY machine_id`
+      `SELECT machine_id, COUNT(*) AS total_coins FROM coins GROUP BY machine_id`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -94,13 +94,36 @@ async function generateSequentialId(name: string): Promise<string> {
   return `${prefix}${next}`;
 }
 
+function normalizeMachineTypeKey(
+  input: unknown,
+): "boxeo" | "agilidad" | "default" {
+  const raw = typeof input === "string" ? input.trim().toLowerCase() : "";
+  if (raw.startsWith("box")) return "boxeo";
+  if (raw.startsWith("agi")) return "agilidad";
+  return "default";
+}
+
+function inferTypeKeyFromId(idStr: string): "boxeo" | "agilidad" | "default" {
+  const s = String(idStr || "");
+  if (s.includes("Maquina_Boxeo_")) return "boxeo";
+  if (s.includes("Maquina_Agilidad_")) return "agilidad";
+  return "default";
+}
+
+function inferTypeKeyFromName(name: string): "boxeo" | "agilidad" | "default" {
+  const s = String(name || "").toLowerCase();
+  if (s.includes("boxeo")) return "boxeo";
+  if (s.includes("agilidad")) return "agilidad";
+  return "default";
+}
+
 export const getMachines = (req: Request, res: Response) => {
   pool
     .query(
       `SELECT m.*,
         (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_on' ORDER BY timestamp DESC LIMIT 1) AS last_on,
         (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_off' ORDER BY timestamp DESC LIMIT 1) AS last_off
-      FROM machines m`
+      FROM machines m`,
     )
     .then((result) => res.json(result.rows))
     .catch((err) => {
@@ -117,7 +140,7 @@ export const getMachineById = (req: Request, res: Response) => {
         (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_on' ORDER BY timestamp DESC LIMIT 1) AS last_on,
         (SELECT timestamp FROM machine_events me WHERE me.machine_id = m.id AND me.type = 'machine_off' ORDER BY timestamp DESC LIMIT 1) AS last_off
       FROM machines m WHERE m.id = $1`,
-      [id]
+      [id],
     )
     .then((result) => {
       if (result.rowCount === 0)
@@ -146,9 +169,14 @@ export const createMachine = async (req: Request, res: Response) => {
       machineId = await generateSequentialId(name);
     }
 
+    const typeKey =
+      typeof type === "string" && type.trim()
+        ? normalizeMachineTypeKey(type)
+        : (inferTypeKeyFromId(machineId) ?? inferTypeKeyFromName(name));
+
     const result = await pool.query(
-      "INSERT INTO machines (id, name, status, location, last_ping) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [machineId, name, "inactive", location || "Unknown", new Date()]
+      "INSERT INTO machines (id, name, status, location, last_ping, type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+      [machineId, name, "inactive", location || "Unknown", new Date(), typeKey],
     );
 
     res.status(201).json(result.rows[0]);
@@ -167,7 +195,7 @@ export const updateMachine = async (req: Request, res: Response) => {
     // Fetch existing machine
     const existingRes = await client.query(
       "SELECT * FROM machines WHERE id = $1",
-      [id]
+      [id],
     );
     if (existingRes.rowCount === 0) {
       return res.status(404).json({ message: "Machine not found" });
@@ -185,32 +213,43 @@ export const updateMachine = async (req: Request, res: Response) => {
     console.log("[updateMachine] existing machine:", existing);
 
     // Infer types: use existing.id to determine current group (more reliable than name)
-    const inferTypeFromId = (idStr: string) =>
+    const inferGroupFromId = (idStr: string) =>
       idStr && idStr.includes("Maquina_Boxeo_") ? "Boxeo" : "Agilidad";
-    const inferTypeFromName = (n: string) =>
-      n && n.startsWith("Boxeo") ? "Boxeo" : "Agilidad";
+    const inferGroupFromName = (n: string) =>
+      n && n.toLowerCase().includes("boxeo") ? "Boxeo" : "Agilidad";
+    const normalizeGroup = (t: unknown) =>
+      normalizeMachineTypeKey(t) === "boxeo" ? "Boxeo" : "Agilidad";
 
-    const oldType = inferTypeFromId(existing.id || "");
-    const newType = type || (name ? inferTypeFromName(name) : oldType);
+    const oldType = inferGroupFromId(existing.id || "");
+    const newType = type
+      ? normalizeGroup(type)
+      : name
+        ? inferGroupFromName(name)
+        : oldType;
+    const newTypeKey = type
+      ? normalizeMachineTypeKey(type)
+      : inferTypeKeyFromId(existing.id || "") ||
+        inferTypeKeyFromName(name || "");
 
     console.log(
       "[updateMachine] inferred oldType from id:",
       oldType,
       "newType from payload/name:",
-      newType
+      newType,
     );
 
     // If type group didn't change, just update fields normally
     if (newType === oldType) {
       const result = await client.query(
-        "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status), test_mode = COALESCE($4, test_mode) WHERE id = $5 RETURNING *",
+        "UPDATE machines SET name = COALESCE($1, name), location = COALESCE($2, location), status = COALESCE($3, status), test_mode = COALESCE($4, test_mode), type = COALESCE($5, type) WHERE id = $6 RETURNING *",
         [
           name,
           location,
           status,
           typeof test_mode === "undefined" ? null : test_mode,
+          newTypeKey,
           id,
-        ]
+        ],
       );
       return res.json(result.rows[0]);
     }
@@ -223,7 +262,7 @@ export const updateMachine = async (req: Request, res: Response) => {
     await client.query("BEGIN");
     // Insert a new machine row with new id and updated fields
     await client.query(
-      "INSERT INTO machines (id, name, status, location, last_ping, test_mode) SELECT $1, COALESCE($2, name), COALESCE($3, status), COALESCE($4, location), last_ping, COALESCE($6, test_mode) FROM machines WHERE id = $5",
+      "INSERT INTO machines (id, name, status, location, last_ping, test_mode, type) SELECT $1, COALESCE($2, name), COALESCE($3, status), COALESCE($4, location), last_ping, COALESCE($6, test_mode), $7 FROM machines WHERE id = $5",
       [
         newId,
         name,
@@ -231,17 +270,18 @@ export const updateMachine = async (req: Request, res: Response) => {
         location,
         id,
         typeof test_mode === "undefined" ? null : test_mode,
-      ]
+        newTypeKey,
+      ],
     );
 
     // Migrate referencing rows to point to the new id
     await client.query(
       "UPDATE machine_events SET machine_id = $1 WHERE machine_id = $2",
-      [newId, id]
+      [newId, id],
     );
     await client.query(
       "UPDATE coins SET machine_id = $1 WHERE machine_id = $2",
-      [newId, id]
+      [newId, id],
     );
 
     // Delete old machine row
@@ -268,7 +308,7 @@ export const deleteMachine = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       "DELETE FROM machines WHERE id = $1 RETURNING id",
-      [id]
+      [id],
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ message: "Machine not found" });
@@ -296,7 +336,7 @@ export const getMachineHistory = async (req: Request, res: Response) => {
          AND ($2::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
          AND ($3::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
        ORDER BY me.timestamp DESC`,
-      [id, startDate || null, endDate || null]
+      [id, startDate || null, endDate || null],
     );
 
     res.json(result.rows);
@@ -320,7 +360,7 @@ export const getMachinePowerLogs = async (req: Request, res: Response) => {
          AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
          AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
        ORDER BY timestamp ASC`,
-      [id, startDate || null, endDate || null]
+      [id, startDate || null, endDate || null],
     );
 
     type RawRow = { type: string; timestamp: Date };
@@ -385,14 +425,14 @@ export const getMachineStats = (req: Request, res: Response) => {
       // Fetch non-test events for computing sessions/scores
       const eventsRes = await pool.query(
         "SELECT * FROM machine_events WHERE machine_id = $1 AND NOT (data->>'test' = 'true')",
-        [id]
+        [id],
       );
       const events = eventsRes.rows;
 
       // Compute totalIncome from the persisted `coins` table so only real coins are counted
       const coinsRes = await pool.query(
         "SELECT COUNT(*) AS cnt FROM coins WHERE machine_id = $1",
-        [id]
+        [id],
       );
       const totalIncome = Number(coinsRes.rows[0]?.cnt ?? 0);
 
@@ -400,7 +440,7 @@ export const getMachineStats = (req: Request, res: Response) => {
         .filter((e) => e.type === "game_end")
         .reduce((sum, e) => sum + (e.data?.score || 0), 0);
       const activeSessions = events.filter(
-        (e) => e.type === "game_start"
+        (e) => e.type === "game_start",
       ).length;
       const usageRate = events.length > 0 ? 45.5 : 0;
       res.json({ totalIncome, totalScore, activeSessions, usageRate });
@@ -416,7 +456,7 @@ export const getTotalCoins = async (req: Request, res: Response) => {
     console.log("[GET] /api/machines/coins/total");
     // Count persisted coins (we avoid inserting coins for machines in test_mode)
     const result = await pool.query(
-      "SELECT COUNT(*) AS total_coins FROM coins"
+      "SELECT COUNT(*) AS total_coins FROM coins",
     );
     const totalCoins = Number(result.rows[0]?.total_coins ?? 0);
     console.log("Total coins computed:", totalCoins);
