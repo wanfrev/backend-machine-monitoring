@@ -35,7 +35,8 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ message: "Access token required" });
   }
 
-  const machineId = typeof req.body?.machineId === "string" ? req.body.machineId : "";
+  const machineId =
+    typeof req.body?.machineId === "string" ? req.body.machineId : "";
   const date = typeof req.body?.date === "string" ? req.body.date : "";
   const coinsRaw = req.body?.coins;
   const recordMessage =
@@ -44,17 +45,26 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
 
   const coins = Number(coinsRaw);
   const prizeBs =
-    prizeBsRaw === null || typeof prizeBsRaw === "undefined" || prizeBsRaw === ""
+    prizeBsRaw === null ||
+    typeof prizeBsRaw === "undefined" ||
+    prizeBsRaw === ""
       ? null
       : Number(prizeBsRaw);
 
   const requestedEmployeeIdRaw = req.body?.employeeId;
   const requestedEmployeeId =
-    typeof requestedEmployeeIdRaw === "undefined" || requestedEmployeeIdRaw === null
+    typeof requestedEmployeeIdRaw === "undefined" ||
+    requestedEmployeeIdRaw === null
       ? null
       : Number(requestedEmployeeIdRaw);
 
-  if (!machineId || !date || !isYmd(date) || !Number.isFinite(coins) || coins < 0) {
+  if (
+    !machineId ||
+    !date ||
+    !isYmd(date) ||
+    !Number.isFinite(coins) ||
+    coins < 0
+  ) {
     return res.status(400).json({ message: "Invalid payload" });
   }
   if (prizeBs !== null && (!Number.isFinite(prizeBs) || prizeBs < 0)) {
@@ -66,7 +76,10 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ message: "User not found" });
   }
 
-  const employeeId = authUser.role === "admin" ? (requestedEmployeeId ?? authUserId) : authUserId;
+  const employeeId =
+    authUser.role === "admin"
+      ? (requestedEmployeeId ?? authUserId)
+      : authUserId;
 
   // Enforce that non-admin users can only log for themselves.
   if (authUser.role !== "admin" && employeeId !== authUserId) {
