@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { pool } from "../db";
 import { User } from "../models/types";
+import type { AuthRequest } from "../middleware/authMiddleware";
 
 // Helper for ID if uuid not installed, but I should install it.
 // For now, simple random string.
@@ -24,7 +25,7 @@ export const getUsers = (req: Request, res: Response) => {
         ) AS "assignedMachineIds"
       FROM users u
       LEFT JOIN user_machines um ON um.user_id = u.id
-      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role`
+      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role`,
     )
     .then((result) => res.json(result.rows))
     .catch((err) => {
@@ -48,7 +49,7 @@ export const createUser = async (req: Request, res: Response) => {
   let assignedMachineIds: string[] = [];
   if (Array.isArray(rawAssignedMany)) {
     assignedMachineIds = rawAssignedMany.filter(
-      (v: unknown) => !!v
+      (v: unknown) => !!v,
     ) as string[];
   } else if (singleAssigned) {
     assignedMachineIds = [singleAssigned];
@@ -98,7 +99,7 @@ export const createUser = async (req: Request, res: Response) => {
           shift,
           documentId || null,
           jobRole || null,
-        ]
+        ],
       );
 
       const newUser = result.rows[0] as User;
@@ -109,7 +110,7 @@ export const createUser = async (req: Request, res: Response) => {
             `INSERT INTO user_machines (user_id, machine_id)
              VALUES ($1, $2)
              ON CONFLICT DO NOTHING`,
-            [newUser.id, machineId]
+            [newUser.id, machineId],
           );
         }
       }
@@ -148,7 +149,7 @@ export const updateUser = async (req: Request, res: Response) => {
   let assignedMachineIds: string[] = [];
   if (Array.isArray(rawAssignedMany)) {
     assignedMachineIds = rawAssignedMany.filter(
-      (v: unknown) => !!v
+      (v: unknown) => !!v,
     ) as string[];
   } else if (singleAssigned) {
     assignedMachineIds = [singleAssigned];
@@ -172,7 +173,7 @@ export const updateUser = async (req: Request, res: Response) => {
           role = $6
         WHERE id = $7
         RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
-        [passwordHash, name, shift, documentId, jobRole, role, id]
+        [passwordHash, name, shift, documentId, jobRole, role, id],
       );
     } else {
       result = await client.query(
@@ -184,7 +185,7 @@ export const updateUser = async (req: Request, res: Response) => {
           role = $5
         WHERE id = $6
         RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
-        [name, shift, documentId, jobRole, role, id]
+        [name, shift, documentId, jobRole, role, id],
       );
     }
 
@@ -203,7 +204,7 @@ export const updateUser = async (req: Request, res: Response) => {
           `INSERT INTO user_machines (user_id, machine_id)
            VALUES ($1, $2)
            ON CONFLICT DO NOTHING`,
-          [id, machineId]
+          [id, machineId],
         );
       }
     }
@@ -228,7 +229,7 @@ export const deleteUser = async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       "DELETE FROM users WHERE id = $1 RETURNING id",
-      [id]
+      [id],
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ message: "User not found" });
@@ -237,5 +238,110 @@ export const deleteUser = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Error deleting user:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getMe = async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT
+        u.id,
+        u.username,
+        u.role,
+        u.name,
+        u.shift,
+        u.document_id AS "documentId",
+        u.job_role AS "jobRole",
+        COALESCE(
+          JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
+          '[]'::json
+        ) AS "assignedMachineIds"
+      FROM users u
+      LEFT JOIN user_machines um ON um.user_id = u.id
+      WHERE u.id = $1
+      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role`,
+      [userId],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error fetching current user:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateMe = async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const username =
+    typeof req.body?.username === "string" ? req.body.username.trim() : "";
+
+  if (!name && !username) {
+    return res.status(400).json({ message: "No changes provided" });
+  }
+  if (username && username.length < 3) {
+    return res.status(400).json({ message: "Username too short" });
+  }
+  if (name && name.length < 2) {
+    return res.status(400).json({ message: "Name too short" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    if (username) {
+      const exists = await client.query(
+        "SELECT 1 FROM users WHERE username = $1 AND id <> $2",
+        [username, userId],
+      );
+      if ((exists.rowCount ?? 0) > 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Username already exists" });
+      }
+    }
+
+    const result = await client.query(
+      `UPDATE users
+       SET
+         name = COALESCE(NULLIF($1, ''), name),
+         username = COALESCE(NULLIF($2, ''), username)
+       WHERE id = $3
+       RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
+      [name, username, userId],
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const assignedRes = await client.query(
+      "SELECT COALESCE(JSON_AGG(machine_id), '[]'::json) AS \"assignedMachineIds\" FROM user_machines WHERE user_id = $1",
+      [userId],
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      ...(result.rows[0] as User),
+      assignedMachineIds: assignedRes.rows[0]?.assignedMachineIds ?? [],
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Error updating current user:", err);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 };
