@@ -58,7 +58,8 @@ export const createUser = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Missing required fields" });
   }
   try {
-    if (!["admin", "employee", "operator"].includes(role)) {
+    // DB constraint currently allows only 'admin' and 'employee'
+    if (!["admin", "employee"].includes(role)) {
       return res.status(400).json({ message: "Invalid role" });
     }
     const exists = await pool.query("SELECT 1 FROM users WHERE username = $1", [
@@ -129,7 +130,24 @@ export const createUser = async (req: Request, res: Response) => {
     }
   } catch (err) {
     console.error("Error creating user:", err);
-    res.status(500).json({ message: "Server error" });
+    const e = err as any;
+    // Postgres unique violation
+    if (e?.code === "23505") {
+      if (e?.constraint === "users_document_id_unique") {
+        return res.status(400).json({ message: "La cédula/ID ya existe" });
+      }
+      if (typeof e?.constraint === "string" && e.constraint.includes("username")) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+      return res.status(400).json({ message: "Duplicate value" });
+    }
+
+    // Foreign key violation (e.g. invalid machine_id assignment)
+    if (e?.code === "23503") {
+      return res.status(400).json({ message: "Asignación inválida" });
+    }
+
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -141,6 +159,11 @@ export const updateUser = async (req: Request, res: Response) => {
   const documentId = req.body.documentId ?? req.body.document_id ?? null;
   const jobRole = req.body.jobRole ?? req.body.job_role ?? null;
   const role = req.body.role ?? "employee";
+
+  // DB constraint currently allows only 'admin' and 'employee'
+  if (role && !["admin", "employee"].includes(role)) {
+    return res.status(400).json({ message: "Invalid role" });
+  }
 
   const rawAssignedMany =
     req.body.assignedMachineIds ?? req.body.assigned_machine_ids;
@@ -218,7 +241,14 @@ export const updateUser = async (req: Request, res: Response) => {
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Error updating user:", err);
-    res.status(500).json({ message: "Server error" });
+    const e = err as any;
+    if (e?.code === "23505" && e?.constraint === "users_document_id_unique") {
+      return res.status(400).json({ message: "La cédula/ID ya existe" });
+    }
+    if (e?.code === "23503") {
+      return res.status(400).json({ message: "Asignación inválida" });
+    }
+    return res.status(500).json({ message: "Server error" });
   } finally {
     client.release();
   }

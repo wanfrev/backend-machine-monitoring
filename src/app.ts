@@ -7,6 +7,7 @@ import userRoutes from "./routes/userRoutes";
 import iotRoutes from "./routes/iotRoutes";
 import pushRoutes from "./routes/pushRoutes";
 import coinValueRoutes from "./routes/coinValueRoutes";
+import salesRoutes from "./routes/salesRoutes";
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/iot", iotRoutes);
 app.use("/api/push", pushRoutes);
 app.use("/api/coin-values", coinValueRoutes);
+app.use("/api/sales", salesRoutes);
 
 // Health check
 app.get("/", (req, res) => {
