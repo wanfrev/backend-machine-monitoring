@@ -29,6 +29,14 @@ async function getUserMachineIds(userId: number): Promise<string[]> {
   return (result.rows[0]?.ids as string[]) ?? [];
 }
 
+const toIntNonNeg = (v: unknown, fallback = 0) => {
+  if (v === null || typeof v === "undefined" || v === "") return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  return i >= 0 ? i : null;
+};
+
 export const upsertDailySale = async (req: AuthRequest, res: Response) => {
   const authUserId = Number(req.user?.id);
   if (!Number.isFinite(authUserId)) {
@@ -42,6 +50,8 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
   const recordMessage =
     typeof req.body?.recordMessage === "string" ? req.body.recordMessage : null;
   const prizeBsRaw = req.body?.prizeBs;
+  const lostRaw = req.body?.lost;
+  const returnedRaw = req.body?.returned;
 
   const coins = Number(coinsRaw);
   const prizeBs =
@@ -50,6 +60,9 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
     prizeBsRaw === ""
       ? null
       : Number(prizeBsRaw);
+
+  const lost = toIntNonNeg(lostRaw, 0);
+  const returned = toIntNonNeg(returnedRaw, 0);
 
   const requestedEmployeeIdRaw = req.body?.employeeId;
   const requestedEmployeeId =
@@ -69,6 +82,9 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
   }
   if (prizeBs !== null && (!Number.isFinite(prizeBs) || prizeBs < 0)) {
     return res.status(400).json({ message: "Invalid prizeBs" });
+  }
+  if (lost === null || returned === null) {
+    return res.status(400).json({ message: "Invalid lost/returned" });
   }
 
   const authUser = await getAuthUser(authUserId);
@@ -102,13 +118,17 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
         sale_date,
         coins,
         record_message,
-        prize_bs
-      ) VALUES ($1, $2, $3::date, $4, $5, $6)
+        prize_bs,
+        lost,
+        returned
+      ) VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)
       ON CONFLICT (employee_id, machine_id, sale_date)
       DO UPDATE SET
         coins = EXCLUDED.coins,
         record_message = EXCLUDED.record_message,
         prize_bs = EXCLUDED.prize_bs,
+        lost = EXCLUDED.lost,
+        returned = EXCLUDED.returned,
         updated_at = NOW()
       RETURNING
         id,
@@ -118,9 +138,20 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
         coins,
         record_message AS "recordMessage",
         prize_bs AS "prizeBs",
+        lost,
+        returned,
         created_at AS "createdAt",
         updated_at AS "updatedAt"`,
-      [employeeId, machineId, date, coins, recordMessage, prizeBs],
+      [
+        employeeId,
+        machineId,
+        date,
+        coins,
+        recordMessage,
+        prizeBs,
+        lost,
+        returned,
+      ],
     );
 
     return res.json(result.rows[0]);
@@ -175,6 +206,8 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
           s.coins,
           s.record_message AS "recordMessage",
           s.prize_bs AS "prizeBs",
+          s.lost,
+          s.returned,
           s.created_at AS "createdAt",
           s.updated_at AS "updatedAt"
         FROM employee_daily_sales s
@@ -208,6 +241,8 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
           s.coins,
           s.record_message AS "recordMessage",
           s.prize_bs AS "prizeBs",
+          s.lost,
+          s.returned,
           s.created_at AS "createdAt",
           s.updated_at AS "updatedAt"
         FROM employee_daily_sales s
@@ -242,6 +277,8 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
         s.coins,
         s.record_message AS "recordMessage",
         s.prize_bs AS "prizeBs",
+        s.lost,
+        s.returned,
         s.created_at AS "createdAt",
         s.updated_at AS "updatedAt"
       FROM employee_daily_sales s
