@@ -3,7 +3,7 @@ import { pool } from "../db";
 import { MachineEvent } from "../models/types";
 
 const HEARTBEAT_TIMEOUT_MS = Number(
-  process.env.HEARTBEAT_TIMEOUT_MS || 2 * 60 * 1000
+  process.env.HEARTBEAT_TIMEOUT_MS || 2 * 60 * 1000,
 ); // 2 minutos
 
 export const receiveData = async (req: Request, res: Response) => {
@@ -30,7 +30,7 @@ export const receiveData = async (req: Request, res: Response) => {
     // Verificar que la máquina existe
     const machineResult = await pool.query(
       "SELECT * FROM machines WHERE id = $1",
-      [machineId]
+      [machineId],
     );
     if (machineResult.rowCount === 0) {
       console.warn(`Received data from unknown machine: ${machineId}`);
@@ -81,7 +81,7 @@ export const receiveData = async (req: Request, res: Response) => {
       }
       // Try parse common formats like YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM
       const m = s.match(
-        /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+        /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
       );
       if (m) {
         const y = Number(m[1]);
@@ -104,6 +104,12 @@ export const receiveData = async (req: Request, res: Response) => {
     // Actualizar status y last_ping de la máquina.
     const now = new Date();
     const machineRow = machineResult.rows[0];
+    // Dedup: si la maquina ya esta activa y llega otro ENCENDIDO, tratamos
+    // el evento como ping para evitar notificaciones repetidas.
+    if (internalEvent === "machine_on" && machineRow.status === "active") {
+      internalEvent = "ping";
+      data = { ...(data || {}), reason: data?.reason || "duplicate_on" };
+    }
     let newStatus = machineRow.status as string;
     if (internalEvent === "machine_on" || internalEvent === "ping") {
       newStatus = "active";
@@ -113,7 +119,7 @@ export const receiveData = async (req: Request, res: Response) => {
 
     await pool.query(
       "UPDATE machines SET last_ping = $1, status = $2 WHERE id = $3",
-      [now.toISOString(), newStatus, machineId]
+      [now.toISOString(), newStatus, machineId],
     );
 
     // Mark event as test if the machine is in test_mode (don't count coins)
@@ -138,11 +144,11 @@ export const receiveData = async (req: Request, res: Response) => {
       if (incomingUniqueId) {
         const dupCheck = await pool.query(
           `SELECT id FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' AND (data->>'id_unico') = $2 LIMIT 1`,
-          [machineId, String(incomingUniqueId)]
+          [machineId, String(incomingUniqueId)],
         );
         if ((dupCheck?.rowCount ?? 0) > 0) {
           console.log(
-            `Ignored duplicate coin (id_unico=${incomingUniqueId}) for machine=${machineId}`
+            `Ignored duplicate coin (id_unico=${incomingUniqueId}) for machine=${machineId}`,
           );
           return res.status(200).json({
             status: "ok",
@@ -157,7 +163,7 @@ export const receiveData = async (req: Request, res: Response) => {
         try {
           const lastRes = await pool.query(
             "SELECT timestamp FROM machine_events WHERE machine_id = $1 AND type = 'coin_inserted' ORDER BY timestamp DESC LIMIT 1",
-            [machineId]
+            [machineId],
           );
           if ((lastRes?.rowCount ?? 0) > 0) {
             const lastTs = new Date(lastRes.rows[0].timestamp).getTime();
@@ -165,8 +171,8 @@ export const receiveData = async (req: Request, res: Response) => {
             if (Math.abs(newTs - lastTs) < COIN_DEDUP_MS) {
               console.log(
                 `Ignored coin due to rate dedupe (delta=${Math.abs(
-                  newTs - lastTs
-                )}ms) for machine=${machineId}`
+                  newTs - lastTs,
+                )}ms) for machine=${machineId}`,
               );
               return res.status(200).json({
                 status: "ok",
@@ -184,7 +190,7 @@ export const receiveData = async (req: Request, res: Response) => {
     // Insertar evento
     const eventResult = await pool.query(
       "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-      [machineId, internalEvent, normalizedTs, data]
+      [machineId, internalEvent, normalizedTs, data],
     );
 
     // Si es evento de moneda, insertar en coins
@@ -195,7 +201,7 @@ export const receiveData = async (req: Request, res: Response) => {
         // when deciding whether to persist the coin.
         const latestMachineRes = await pool.query(
           "SELECT status, test_mode, name, location FROM machines WHERE id = $1",
-          [machineId]
+          [machineId],
         );
         const latestMachine = latestMachineRes.rows[0] || machineRow;
 
@@ -203,7 +209,7 @@ export const receiveData = async (req: Request, res: Response) => {
         // or if the machine was not marked as active (likely a startup ghost coin).
         if (latestMachine.test_mode || latestMachine.status !== "active") {
           console.log(
-            `Coin ignorada (test_mode=${!!latestMachine.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`
+            `Coin ignorada (test_mode=${!!latestMachine.test_mode} or inactive before event): machine_id=${machineId}, event_id=${eventId}`,
           );
         } else {
           // Persist coin and include unique_id when available to enforce idempotency at DB level.
@@ -215,7 +221,7 @@ export const receiveData = async (req: Request, res: Response) => {
             // No unique id: simple insert (no uniqueness check possible)
             insertRes = await pool.query(
               "INSERT INTO coins (machine_id, event_id) VALUES ($1, $2) RETURNING id",
-              [String(machineId), eventId]
+              [String(machineId), eventId],
             );
           } else {
             // With unique id: ensure we don't insert duplicates (use explicit cast)
@@ -226,16 +232,16 @@ export const receiveData = async (req: Request, res: Response) => {
                  SELECT 1 FROM coins WHERE machine_id = $1::text AND unique_id = $3::text
                )
                RETURNING id`,
-              [String(machineId), eventId, String(uniqueIdForCoin)]
+              [String(machineId), eventId, String(uniqueIdForCoin)],
             );
           }
           if (insertRes.rowCount === 0) {
             console.log(
-              `Coin duplicada ignorada por ON CONFLICT: machine_id=${machineId}, unique_id=${uniqueIdForCoin}, event_id=${eventId}`
+              `Coin duplicada ignorada por ON CONFLICT: machine_id=${machineId}, unique_id=${uniqueIdForCoin}, event_id=${eventId}`,
             );
           } else {
             console.log(
-              `Coin registrada: machine_id=${machineId}, event_id=${eventId}`
+              `Coin registrada: machine_id=${machineId}, event_id=${eventId}`,
             );
           }
 
@@ -255,14 +261,13 @@ export const receiveData = async (req: Request, res: Response) => {
           } catch (socketErr) {
             console.error(
               "Error emitiendo evento coin_inserted por Socket.IO:",
-              socketErr
+              socketErr,
             );
           }
 
           try {
-            const { sendNotificationToAll } = await import(
-              "../utils/pushSubscriptions"
-            );
+            const { sendNotificationToAll } =
+              await import("../utils/pushSubscriptions");
             await sendNotificationToAll({
               title: "Moneda ingresada",
               body: `${machineRow.name} ${
@@ -292,7 +297,7 @@ export const receiveData = async (req: Request, res: Response) => {
         const onTs = normalizeTimestamp(timestamp);
         const onRes = await pool.query(
           "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-          [machineId, "machine_on", onTs, { auto: true, reason: "ping" }]
+          [machineId, "machine_on", onTs, { auto: true, reason: "ping" }],
         );
         const onEventId = onRes.rows[0].id;
         try {
@@ -307,7 +312,7 @@ export const receiveData = async (req: Request, res: Response) => {
               timestamp: onTs,
             });
             console.log(
-              `Auto machine_on emitted due to ping -> machine=${machineId} eventId=${onEventId}`
+              `Auto machine_on emitted due to ping -> machine=${machineId} eventId=${onEventId}`,
             );
           }
         } catch (emitErr) {
@@ -315,9 +320,8 @@ export const receiveData = async (req: Request, res: Response) => {
         }
 
         try {
-          const { sendNotificationToAll } = await import(
-            "../utils/pushSubscriptions"
-          );
+          const { sendNotificationToAll } =
+            await import("../utils/pushSubscriptions");
           await sendNotificationToAll({
             title: "Máquina encendida",
             body: `${machineRow.name} ${
@@ -358,14 +362,13 @@ export const receiveData = async (req: Request, res: Response) => {
       } catch (socketErr) {
         console.error(
           `Error emitiendo evento ${internalEvent} por Socket.IO:`,
-          socketErr
+          socketErr,
         );
       }
 
       try {
-        const { sendNotificationToAll } = await import(
-          "../utils/pushSubscriptions"
-        );
+        const { sendNotificationToAll } =
+          await import("../utils/pushSubscriptions");
         const ts = normalizedTs;
         // Asegura que el timestamp se interprete como UTC si no tiene zona
         let dateObj: Date;
@@ -467,7 +470,7 @@ export const getEvents = async (req: Request, res: Response) => {
             0,
             0,
             0,
-            0
+            0,
           );
           params.push(s.toISOString());
         } else {
@@ -494,7 +497,7 @@ export const getEvents = async (req: Request, res: Response) => {
             23,
             59,
             59,
-            999
+            999,
           );
           // small buffer to tolerate clock skew
           t.setMilliseconds(t.getMilliseconds() + 1000);
