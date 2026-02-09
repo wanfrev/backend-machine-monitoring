@@ -52,6 +52,7 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
   const prizeBsRaw = req.body?.prizeBs;
   const lostRaw = req.body?.lost;
   const returnedRaw = req.body?.returned;
+  const entryCoinsRaw = req.body?.entryCoins;
 
   const coins = Number(coinsRaw);
   const prizeBs =
@@ -63,6 +64,12 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
 
   const lost = toIntNonNeg(lostRaw, 0);
   const returned = toIntNonNeg(returnedRaw, 0);
+  const entryCoins =
+    typeof entryCoinsRaw === "undefined" ||
+    entryCoinsRaw === null ||
+    entryCoinsRaw === ""
+      ? null
+      : toIntNonNeg(entryCoinsRaw, 0);
 
   const requestedEmployeeIdRaw = req.body?.employeeId;
   const requestedEmployeeId =
@@ -85,6 +92,9 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
   }
   if (lost === null || returned === null) {
     return res.status(400).json({ message: "Invalid lost/returned" });
+  }
+  if (entryCoins === null && typeof entryCoinsRaw !== "undefined") {
+    return res.status(400).json({ message: "Invalid entryCoins" });
   }
 
   const authUser = await getAuthUser(authUserId);
@@ -154,6 +164,39 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
       ],
     );
 
+    const shouldLogEntry =
+      entryCoins !== null ||
+      recordMessage ||
+      prizeBs !== null ||
+      (lost ?? 0) > 0 ||
+      (returned ?? 0) > 0;
+
+    if (shouldLogEntry) {
+      const entryCoinsValue = entryCoins ?? 0;
+      await pool.query(
+        `INSERT INTO employee_daily_sale_entries (
+          employee_id,
+          machine_id,
+          sale_date,
+          coins,
+          record_message,
+          prize_bs,
+          lost,
+          returned
+        ) VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)`,
+        [
+          employeeId,
+          machineId,
+          date,
+          entryCoinsValue,
+          recordMessage,
+          prizeBs,
+          lost,
+          returned,
+        ],
+      );
+    }
+
     return res.json(result.rows[0]);
   } catch (err) {
     console.error("Error upserting daily sale:", err);
@@ -174,6 +217,7 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
   const machineId = asString(req.query?.machineId) || null;
   const employeeIdRaw = asString(req.query?.employeeId);
   const employeeId = employeeIdRaw ? Number(employeeIdRaw) : null;
+  const summary = asString(req.query?.summary).toLowerCase();
 
   if (startDate && !isYmd(startDate)) {
     return res.status(400).json({ message: "Invalid startDate" });
@@ -191,6 +235,92 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
   }
 
   try {
+    if (summary === "employee") {
+      if (authUser.role === "admin") {
+        const result = await pool.query(
+          `SELECT
+            u.id AS "employeeId",
+            u.username AS "employeeUsername",
+            u.name AS "employeeName",
+            COALESCE(
+              (
+                SELECT JSON_AGG(DISTINCT COALESCE(m.name, um.machine_id))
+                FROM user_machines um
+                LEFT JOIN machines m ON m.id = um.machine_id
+                WHERE um.user_id = u.id
+              ),
+              '[]'::json
+            ) AS "machineNames",
+            COALESCE(
+              (
+                SELECT SUM(s.coins)
+                FROM employee_daily_sales s
+                WHERE s.employee_id = u.id
+                  AND ($1::date IS NULL OR s.sale_date >= $1::date)
+                  AND ($2::date IS NULL OR s.sale_date <= $2::date)
+              ),
+              0
+            ) AS "totalCoins"
+          FROM users u
+          WHERE u.role = 'employee'
+            AND ($3::int IS NULL OR u.id = $3::int)
+          ORDER BY "totalCoins" DESC, u.name`,
+          [startDate, endDate, employeeId],
+        );
+        return res.json(result.rows);
+      }
+
+      const supervisor = isSupervisorJobRole(authUser.jobRole);
+      if (!supervisor) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const supervisorMachineIds = await getUserMachineIds(authUserId);
+      if (supervisorMachineIds.length === 0) {
+        return res.json([]);
+      }
+
+      const result = await pool.query(
+        `SELECT
+          u.id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          COALESCE(
+            (
+              SELECT JSON_AGG(DISTINCT COALESCE(m.name, um.machine_id))
+              FROM user_machines um
+              LEFT JOIN machines m ON m.id = um.machine_id
+              WHERE um.user_id = u.id
+                AND um.machine_id = ANY($3::text[])
+            ),
+            '[]'::json
+          ) AS "machineNames",
+          COALESCE(
+            (
+              SELECT SUM(s.coins)
+              FROM employee_daily_sales s
+              WHERE s.employee_id = u.id
+                AND s.machine_id = ANY($3::text[])
+                AND ($1::date IS NULL OR s.sale_date >= $1::date)
+                AND ($2::date IS NULL OR s.sale_date <= $2::date)
+            ),
+            0
+          ) AS "totalCoins"
+        FROM users u
+        WHERE u.role = 'employee'
+          AND u.id IN (
+            SELECT um.user_id
+            FROM user_machines um
+            WHERE um.machine_id = ANY($3::text[])
+          )
+          AND ($4::int IS NULL OR u.id = $4::int)
+        ORDER BY "totalCoins" DESC, u.name`,
+        [startDate, endDate, supervisorMachineIds, employeeId],
+      );
+
+      return res.json(result.rows);
+    }
+
     if (authUser.role === "admin") {
       const result = await pool.query(
         `SELECT
@@ -296,6 +426,134 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
     return res.json(result.rows);
   } catch (err) {
     console.error("Error listing daily sales:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const listDailySaleEntries = async (req: AuthRequest, res: Response) => {
+  const authUserId = Number(req.user?.id);
+  if (!Number.isFinite(authUserId)) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+
+  const asString = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+  const startDate = asString(req.query?.startDate) || null;
+  const endDate = asString(req.query?.endDate) || null;
+  const machineId = asString(req.query?.machineId) || null;
+  const employeeIdRaw = asString(req.query?.employeeId);
+  const employeeId = employeeIdRaw ? Number(employeeIdRaw) : null;
+
+  if (startDate && !isYmd(startDate)) {
+    return res.status(400).json({ message: "Invalid startDate" });
+  }
+  if (endDate && !isYmd(endDate)) {
+    return res.status(400).json({ message: "Invalid endDate" });
+  }
+  if (employeeIdRaw && !Number.isFinite(employeeId)) {
+    return res.status(400).json({ message: "Invalid employeeId" });
+  }
+
+  const authUser = await getAuthUser(authUserId);
+  if (!authUser) {
+    return res.status(401).json({ message: "User not found" });
+  }
+
+  try {
+    if (authUser.role === "admin") {
+      const result = await pool.query(
+        `SELECT
+          e.id,
+          e.machine_id AS "machineId",
+          m.name AS "machineName",
+          e.employee_id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          e.sale_date AS "date",
+          e.coins,
+          e.record_message AS "recordMessage",
+          e.prize_bs AS "prizeBs",
+          e.lost,
+          e.returned,
+          e.created_at AS "createdAt"
+        FROM employee_daily_sale_entries e
+        JOIN users u ON u.id = e.employee_id
+        JOIN machines m ON m.id = e.machine_id
+        WHERE ($1::date IS NULL OR e.sale_date >= $1::date)
+          AND ($2::date IS NULL OR e.sale_date <= $2::date)
+          AND ($3::text IS NULL OR e.machine_id = $3::text)
+          AND ($4::int IS NULL OR e.employee_id = $4::int)
+        ORDER BY e.created_at DESC`,
+        [startDate, endDate, machineId, employeeId],
+      );
+      return res.json(result.rows);
+    }
+
+    const supervisor = isSupervisorJobRole(authUser.jobRole);
+    if (!supervisor) {
+      const result = await pool.query(
+        `SELECT
+          e.id,
+          e.machine_id AS "machineId",
+          m.name AS "machineName",
+          e.employee_id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          e.sale_date AS "date",
+          e.coins,
+          e.record_message AS "recordMessage",
+          e.prize_bs AS "prizeBs",
+          e.lost,
+          e.returned,
+          e.created_at AS "createdAt"
+        FROM employee_daily_sale_entries e
+        JOIN users u ON u.id = e.employee_id
+        JOIN machines m ON m.id = e.machine_id
+        WHERE e.employee_id = $1
+          AND ($2::date IS NULL OR e.sale_date >= $2::date)
+          AND ($3::date IS NULL OR e.sale_date <= $3::date)
+          AND ($4::text IS NULL OR e.machine_id = $4::text)
+        ORDER BY e.created_at DESC`,
+        [authUserId, startDate, endDate, machineId],
+      );
+      return res.json(result.rows);
+    }
+
+    const supervisorMachineIds = await getUserMachineIds(authUserId);
+    if (supervisorMachineIds.length === 0) {
+      return res.json([]);
+    }
+
+    const result = await pool.query(
+      `SELECT
+        e.id,
+        e.machine_id AS "machineId",
+        m.name AS "machineName",
+        e.employee_id AS "employeeId",
+        u.username AS "employeeUsername",
+        u.name AS "employeeName",
+        e.sale_date AS "date",
+        e.coins,
+        e.record_message AS "recordMessage",
+        e.prize_bs AS "prizeBs",
+        e.lost,
+        e.returned,
+        e.created_at AS "createdAt"
+      FROM employee_daily_sale_entries e
+      JOIN users u ON u.id = e.employee_id
+      JOIN machines m ON m.id = e.machine_id
+      WHERE e.machine_id = ANY($1::text[])
+        AND ($2::date IS NULL OR e.sale_date >= $2::date)
+        AND ($3::date IS NULL OR e.sale_date <= $3::date)
+        AND ($4::text IS NULL OR e.machine_id = $4::text)
+        AND ($5::int IS NULL OR e.employee_id = $5::int)
+      ORDER BY e.created_at DESC`,
+      [supervisorMachineIds, startDate, endDate, machineId, employeeId],
+    );
+
+    return res.json(result.rows);
+  } catch (err) {
+    console.error("Error listing daily sale entries:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
