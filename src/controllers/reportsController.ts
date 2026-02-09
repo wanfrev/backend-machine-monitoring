@@ -19,6 +19,16 @@ async function getAuthUser(userId: number) {
     | undefined;
 }
 
+async function getUserMachineIds(userId: number): Promise<string[]> {
+  const result = await pool.query(
+    `SELECT COALESCE(JSON_AGG(machine_id), '[]'::json) AS "ids"
+     FROM user_machines
+     WHERE user_id = $1`,
+    [userId],
+  );
+  return (result.rows[0]?.ids as string[]) ?? [];
+}
+
 const toNumber = (v: unknown) => {
   if (v === null || typeof v === "undefined" || v === "") return null;
   const n = Number(v);
@@ -218,16 +228,80 @@ export const listWeeklyReports = async (req: AuthRequest, res: Response) => {
 
   const supervisor = authUser.role === "admin" || isSupervisorJobRole(authUser.jobRole);
 
-  const effectiveEmployeeId =
-    authUser.role === "admin"
-      ? employeeId
-      : supervisor
-        ? employeeId
-        : authUserId;
-
   try {
+    if (authUser.role === "admin") {
+      const result = await pool.query(
+        `SELECT
+          r.id,
+          r.employee_id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          r.week_end_date AS "weekEndDate",
+          r.boxeo_coins AS "boxeoCoins",
+          r.boxeo_lost AS "boxeoLost",
+          r.boxeo_returned AS "boxeoReturned",
+          r.agilidad_coins AS "agilidadCoins",
+          r.agilidad_lost AS "agilidadLost",
+          r.agilidad_returned AS "agilidadReturned",
+          r.remaining_coins AS "remainingCoins",
+          r.pago_movil AS "pagoMovil",
+          r.dolares,
+          r.bolivares,
+          r.premio,
+          r.total,
+          r.created_at AS "createdAt",
+          r.updated_at AS "updatedAt"
+        FROM employee_weekly_reports r
+        JOIN users u ON u.id = r.employee_id
+        WHERE ($1::date IS NULL OR r.week_end_date >= $1::date)
+          AND ($2::date IS NULL OR r.week_end_date <= $2::date)
+          AND ($3::int IS NULL OR r.employee_id = $3::int)
+        ORDER BY r.week_end_date DESC, u.name`,
+        [startDate, endDate, employeeId],
+      );
+      return res.json(result.rows);
+    }
+
+    if (!supervisor) {
+      const result = await pool.query(
+        `SELECT
+          r.id,
+          r.employee_id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          r.week_end_date AS "weekEndDate",
+          r.boxeo_coins AS "boxeoCoins",
+          r.boxeo_lost AS "boxeoLost",
+          r.boxeo_returned AS "boxeoReturned",
+          r.agilidad_coins AS "agilidadCoins",
+          r.agilidad_lost AS "agilidadLost",
+          r.agilidad_returned AS "agilidadReturned",
+          r.remaining_coins AS "remainingCoins",
+          r.pago_movil AS "pagoMovil",
+          r.dolares,
+          r.bolivares,
+          r.premio,
+          r.total,
+          r.created_at AS "createdAt",
+          r.updated_at AS "updatedAt"
+        FROM employee_weekly_reports r
+        JOIN users u ON u.id = r.employee_id
+        WHERE r.employee_id = $1
+          AND ($2::date IS NULL OR r.week_end_date >= $2::date)
+          AND ($3::date IS NULL OR r.week_end_date <= $3::date)
+        ORDER BY r.week_end_date DESC, u.name`,
+        [authUserId, startDate, endDate],
+      );
+      return res.json(result.rows);
+    }
+
+    const supervisorMachineIds = await getUserMachineIds(authUserId);
+    if (supervisorMachineIds.length === 0) {
+      return res.json([]);
+    }
+
     const result = await pool.query(
-      `SELECT
+      `SELECT DISTINCT ON (r.id)
         r.id,
         r.employee_id AS "employeeId",
         u.username AS "employeeUsername",
@@ -249,11 +323,13 @@ export const listWeeklyReports = async (req: AuthRequest, res: Response) => {
         r.updated_at AS "updatedAt"
       FROM employee_weekly_reports r
       JOIN users u ON u.id = r.employee_id
-      WHERE ($1::date IS NULL OR r.week_end_date >= $1::date)
-        AND ($2::date IS NULL OR r.week_end_date <= $2::date)
-        AND ($3::int IS NULL OR r.employee_id = $3::int)
-      ORDER BY r.week_end_date DESC, u.name`,
-      [startDate, endDate, effectiveEmployeeId],
+      JOIN user_machines um ON um.user_id = r.employee_id
+      WHERE um.machine_id = ANY($1::text[])
+        AND ($2::date IS NULL OR r.week_end_date >= $2::date)
+        AND ($3::date IS NULL OR r.week_end_date <= $3::date)
+        AND ($4::int IS NULL OR r.employee_id = $4::int)
+      ORDER BY r.id, r.week_end_date DESC, u.name`,
+      [supervisorMachineIds, startDate, endDate, employeeId],
     );
     return res.json(result.rows);
   } catch (err) {
