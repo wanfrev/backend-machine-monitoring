@@ -308,6 +308,7 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
           ) AS "totalCoins"
         FROM users u
         WHERE u.role = 'employee'
+          AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
           AND u.id IN (
             SELECT um.user_id
             FROM user_machines um
