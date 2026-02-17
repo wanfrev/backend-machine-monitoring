@@ -263,6 +263,7 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
             ) AS "totalCoins"
           FROM users u
           WHERE u.role = 'employee'
+            AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
             AND ($3::int IS NULL OR u.id = $3::int)
           ORDER BY "totalCoins" DESC, u.name`,
           [startDate, endDate, employeeId],
@@ -348,6 +349,7 @@ export const listDailySales = async (req: AuthRequest, res: Response) => {
           AND ($2::date IS NULL OR s.sale_date <= $2::date)
           AND ($3::text IS NULL OR s.machine_id = $3::text)
           AND ($4::int IS NULL OR s.employee_id = $4::int)
+          AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
         ORDER BY s.sale_date DESC, s.machine_id, u.name`,
         [startDate, endDate, machineId, employeeId],
       );
@@ -484,6 +486,7 @@ export const listDailySaleEntries = async (req: AuthRequest, res: Response) => {
           AND ($2::date IS NULL OR e.sale_date <= $2::date)
           AND ($3::text IS NULL OR e.machine_id = $3::text)
           AND ($4::int IS NULL OR e.employee_id = $4::int)
+          AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
         ORDER BY e.created_at DESC`,
         [startDate, endDate, machineId, employeeId],
       );

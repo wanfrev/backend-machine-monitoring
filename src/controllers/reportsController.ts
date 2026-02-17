@@ -256,6 +256,7 @@ export const listWeeklyReports = async (req: AuthRequest, res: Response) => {
         WHERE ($1::date IS NULL OR r.week_end_date >= $1::date)
           AND ($2::date IS NULL OR r.week_end_date <= $2::date)
           AND ($3::int IS NULL OR r.employee_id = $3::int)
+          AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
         ORDER BY r.week_end_date DESC, u.name`,
         [startDate, endDate, employeeId],
       );
