@@ -56,6 +56,9 @@ export const upsertWeeklyReport = async (req: AuthRequest, res: Response) => {
 
   const weekEndDate =
     typeof req.body?.weekEndDate === "string" ? req.body.weekEndDate : "";
+  const reportKindRaw =
+    typeof req.body?.reportKind === "string" ? req.body.reportKind : "";
+  const reportKind = reportKindRaw.trim().toLowerCase();
 
   const requestedEmployeeIdRaw = req.body?.employeeId;
   const requestedEmployeeId =
@@ -117,6 +120,68 @@ export const upsertWeeklyReport = async (req: AuthRequest, res: Response) => {
   }
 
   try {
+    if (reportKind === "diario") {
+      const result = await pool.query(
+        `INSERT INTO employee_daily_reports (
+          employee_id,
+          report_date,
+          boxeo_coins,
+          boxeo_lost,
+          boxeo_returned,
+          agilidad_coins,
+          agilidad_lost,
+          agilidad_returned,
+          remaining_coins,
+          pago_movil,
+          dolares,
+          bolivares,
+          premio,
+          total
+        ) VALUES (
+          $1, $2::date,
+          $3, $4, $5,
+          $6, $7, $8,
+          $9,
+          $10, $11, $12, $13, $14
+        )
+        RETURNING
+          id,
+          employee_id AS "employeeId",
+          report_date AS "weekEndDate",
+          boxeo_coins AS "boxeoCoins",
+          boxeo_lost AS "boxeoLost",
+          boxeo_returned AS "boxeoReturned",
+          agilidad_coins AS "agilidadCoins",
+          agilidad_lost AS "agilidadLost",
+          agilidad_returned AS "agilidadReturned",
+          remaining_coins AS "remainingCoins",
+          pago_movil AS "pagoMovil",
+          dolares,
+          bolivares,
+          premio,
+          total,
+          created_at AS "createdAt"`,
+        [
+          employeeId,
+          weekEndDate,
+          boxeoCoins,
+          boxeoLost,
+          boxeoReturned,
+          agilidadCoins,
+          agilidadLost,
+          agilidadReturned,
+          remainingCoins,
+          pagoMovil,
+          dolares,
+          bolivares,
+          premio,
+          total,
+        ],
+      );
+
+      return res.json(result.rows[0]);
+    }
+
     const result = await pool.query(
       `INSERT INTO employee_weekly_reports (
         employee_id,
@@ -210,6 +275,8 @@ export const listWeeklyReports = async (req: AuthRequest, res: Response) => {
   const endDate = asString(req.query?.endDate) || null;
   const employeeIdRaw = asString(req.query?.employeeId);
   const employeeId = employeeIdRaw ? Number(employeeIdRaw) : null;
+  const reportKindRaw = asString(req.query?.reportKind);
+  const reportKind = reportKindRaw.trim().toLowerCase();
 
   if (startDate && !isYmd(startDate)) {
     return res.status(400).json({ message: "Invalid startDate" });
@@ -229,6 +296,113 @@ export const listWeeklyReports = async (req: AuthRequest, res: Response) => {
   const supervisor = authUser.role === "admin" || isSupervisorJobRole(authUser.jobRole);
 
   try {
+    if (reportKind === "diario") {
+      if (authUser.role === "admin") {
+        const result = await pool.query(
+          `SELECT
+            r.id,
+            r.employee_id AS "employeeId",
+            u.username AS "employeeUsername",
+            u.name AS "employeeName",
+            r.report_date AS "weekEndDate",
+            r.boxeo_coins AS "boxeoCoins",
+            r.boxeo_lost AS "boxeoLost",
+            r.boxeo_returned AS "boxeoReturned",
+            r.agilidad_coins AS "agilidadCoins",
+            r.agilidad_lost AS "agilidadLost",
+            r.agilidad_returned AS "agilidadReturned",
+            r.remaining_coins AS "remainingCoins",
+            r.pago_movil AS "pagoMovil",
+            r.dolares,
+            r.bolivares,
+            r.premio,
+            r.total,
+            r.created_at AS "createdAt",
+            NULL::timestamptz AS "updatedAt"
+          FROM employee_daily_reports r
+          JOIN users u ON u.id = r.employee_id
+          WHERE ($1::date IS NULL OR r.report_date >= $1::date)
+            AND ($2::date IS NULL OR r.report_date <= $2::date)
+            AND ($3::int IS NULL OR r.employee_id = $3::int)
+            AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
+          ORDER BY r.report_date DESC, r.created_at DESC, u.name`,
+          [startDate, endDate, employeeId],
+        );
+        return res.json(result.rows);
+      }
+
+      if (!supervisor) {
+        const result = await pool.query(
+          `SELECT
+            r.id,
+            r.employee_id AS "employeeId",
+            u.username AS "employeeUsername",
+            u.name AS "employeeName",
+            r.report_date AS "weekEndDate",
+            r.boxeo_coins AS "boxeoCoins",
+            r.boxeo_lost AS "boxeoLost",
+            r.boxeo_returned AS "boxeoReturned",
+            r.agilidad_coins AS "agilidadCoins",
+            r.agilidad_lost AS "agilidadLost",
+            r.agilidad_returned AS "agilidadReturned",
+            r.remaining_coins AS "remainingCoins",
+            r.pago_movil AS "pagoMovil",
+            r.dolares,
+            r.bolivares,
+            r.premio,
+            r.total,
+            r.created_at AS "createdAt",
+            NULL::timestamptz AS "updatedAt"
+          FROM employee_daily_reports r
+          JOIN users u ON u.id = r.employee_id
+          WHERE r.employee_id = $1
+            AND ($2::date IS NULL OR r.report_date >= $2::date)
+            AND ($3::date IS NULL OR r.report_date <= $3::date)
+          ORDER BY r.report_date DESC, r.created_at DESC`,
+          [authUserId, startDate, endDate],
+        );
+        return res.json(result.rows);
+      }
+
+      const supervisorMachineIds = await getUserMachineIds(authUserId);
+      if (supervisorMachineIds.length === 0) {
+        return res.json([]);
+      }
+
+      const result = await pool.query(
+        `SELECT DISTINCT ON (r.id)
+          r.id,
+          r.employee_id AS "employeeId",
+          u.username AS "employeeUsername",
+          u.name AS "employeeName",
+          r.report_date AS "weekEndDate",
+          r.boxeo_coins AS "boxeoCoins",
+          r.boxeo_lost AS "boxeoLost",
+          r.boxeo_returned AS "boxeoReturned",
+          r.agilidad_coins AS "agilidadCoins",
+          r.agilidad_lost AS "agilidadLost",
+          r.agilidad_returned AS "agilidadReturned",
+          r.remaining_coins AS "remainingCoins",
+          r.pago_movil AS "pagoMovil",
+          r.dolares,
+          r.bolivares,
+          r.premio,
+          r.total,
+          r.created_at AS "createdAt",
+          NULL::timestamptz AS "updatedAt"
+        FROM employee_daily_reports r
+        JOIN users u ON u.id = r.employee_id
+        JOIN user_machines um ON um.user_id = r.employee_id
+        WHERE um.machine_id = ANY($1::text[])
+          AND ($2::date IS NULL OR r.report_date >= $2::date)
+          AND ($3::date IS NULL OR r.report_date <= $3::date)
+          AND ($4::int IS NULL OR r.employee_id = $4::int)
+        ORDER BY r.id, r.report_date DESC, r.created_at DESC, u.name`,
+        [supervisorMachineIds, startDate, endDate, employeeId],
+      );
+      return res.json(result.rows);
+    }
+
     if (authUser.role === "admin") {
       const result = await pool.query(
         `SELECT
