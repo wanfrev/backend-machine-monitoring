@@ -13,17 +13,17 @@ pool
   .query("SELECT 1")
   .then(() => console.log("✅ Conexión a PostgreSQL exitosa"))
   .catch((err: unknown) =>
-    console.error("❌ Error de conexión a PostgreSQL:", err)
+    console.error("❌ Error de conexión a PostgreSQL:", err),
   );
 
 // Cron simple en memoria: marca máquinas como inactivas si no han enviado PING reciente
 // Tiempo por defecto: 1 minuto (configurable vía env HEARTBEAT_TIMEOUT_MS en ms)
 const HEARTBEAT_TIMEOUT_MS = Number(
-  process.env.HEARTBEAT_TIMEOUT_MS || 1 * 60 * 1000
+  process.env.HEARTBEAT_TIMEOUT_MS || 1 * 60 * 1000,
 );
 // Comprobación periódica (por defecto 60s)
 const HEARTBEAT_CHECK_INTERVAL_MS = Number(
-  process.env.HEARTBEAT_CHECK_INTERVAL_MS || 60 * 1000
+  process.env.HEARTBEAT_CHECK_INTERVAL_MS || 60 * 1000,
 );
 // Requerir N intervalos perdidos antes de marcar inactive (evita flapping)
 // Por defecto 1 (marcar inactive tras 1 * HEARTBEAT_TIMEOUT_MS)
@@ -33,7 +33,7 @@ async function markStaleMachinesInactive() {
   try {
     const now = new Date();
     const result = await pool.query(
-      "SELECT id, last_ping FROM machines WHERE status = 'active'"
+      "SELECT id, last_ping FROM machines WHERE status = 'active'",
     );
 
     for (const row of result.rows as { id: string; last_ping: Date | null }[]) {
@@ -48,13 +48,13 @@ async function markStaleMachinesInactive() {
             "machine_off",
             now.toISOString(),
             { auto: true, reason: "timeout" },
-          ]
+          ],
         );
         // Emitir evento y notificar push a suscriptores
         try {
           const machineRes = await pool.query(
             "SELECT * FROM machines WHERE id = $1",
-            [row.id]
+            [row.id],
           );
           const machineRow = machineRes.rows[0];
           const io = app.get("io");
@@ -68,9 +68,8 @@ async function markStaleMachinesInactive() {
             });
           }
           try {
-            const { sendNotificationToAll } = await import(
-              "./utils/pushSubscriptions"
-            );
+            const { sendNotificationForMachine } =
+              await import("./utils/pushSubscriptions");
             const ts = now.toISOString();
             // Asegura que el timestamp se interprete como UTC si no tiene zona
             let dateObj: Date;
@@ -88,39 +87,42 @@ async function markStaleMachinesInactive() {
             const timeStr = dateObj.toLocaleString("es-VE", {
               timeZone: "America/Caracas",
             });
-            await sendNotificationToAll({
-              title: "Máquina apagada",
-              body: `${machineRow?.name ?? row.id} ${
-                machineRow?.location ? `• ${machineRow.location}` : ""
-              } — timeout (${timeStr})`.trim(),
-              data: {
-                machineId: row.id,
-                eventType: "machine_off",
-                auto: true,
-                reason: "timeout",
-                timestamp: ts,
+            await sendNotificationForMachine(
+              {
+                title: "Máquina apagada",
+                body: `${machineRow?.name ?? row.id} ${
+                  machineRow?.location ? `• ${machineRow.location}` : ""
+                } — timeout (${timeStr})`.trim(),
+                data: {
+                  machineId: row.id,
+                  eventType: "machine_off",
+                  auto: true,
+                  reason: "timeout",
+                  timestamp: ts,
+                },
               },
-            });
+              row.id,
+            );
           } catch (pushErr) {
             console.error("Error enviando notificación push (cron):", pushErr);
           }
         } catch (err) {
           console.error(
             "Error al emitir notificación cron para machine_off:",
-            err
+            err,
           );
         }
         // 2. Actualizar estado de la máquina
         await pool.query(
           "UPDATE machines SET status = 'inactive' WHERE id = $1",
-          [row.id]
+          [row.id],
         );
         console.log(
           `⚠️ Máquina ${
             row.id
           } marcada como INACTIVA y evento machine_off registrado por falta de latido (${Math.round(
-            diff / 1000
-          )}s sin PING).`
+            diff / 1000,
+          )}s sin PING).`,
         );
       }
     }

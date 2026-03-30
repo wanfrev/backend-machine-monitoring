@@ -3,6 +3,12 @@ import path from "path";
 import webpush from "web-push";
 import { pool } from "../db";
 
+type StoredSubscription = {
+  endpoint?: string;
+  __userId?: number | string;
+  [key: string]: any;
+};
+
 // Allow configuring a storage path outside the repo to avoid process watchers
 // restarting the app when the file is written. Default: <cwd>/data/push_subscriptions.json
 const DEFAULT_DATA_DIR = path.join(process.cwd(), "data");
@@ -44,11 +50,55 @@ function writeDb(arr: any[]) {
   }
 }
 
-export async function addSubscription(sub: any): Promise<void> {
+function asStoredSubscription(sub: any, userId: number): StoredSubscription {
+  return {
+    ...(sub || {}),
+    __userId: userId,
+  };
+}
+
+function getSubscriptionUserId(sub: StoredSubscription): number | null {
+  const raw = sub?.__userId;
+  if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return Number(raw);
+  return null;
+}
+
+async function getAllowedUserIdsForMachine(
+  machineId: string,
+): Promise<Set<number>> {
+  try {
+    const res = await pool.query(
+      `SELECT DISTINCT u.id
+       FROM users u
+       LEFT JOIN user_machines um
+         ON um.user_id = u.id
+        AND um.machine_id = $1
+       WHERE u.role = 'admin' OR um.user_id IS NOT NULL`,
+      [machineId],
+    );
+    return new Set(
+      res.rows
+        .map((r: any) => Number(r.id))
+        .filter((n: number) => Number.isInteger(n)),
+    );
+  } catch (e) {
+    console.error("Error querying allowed users for machine push:", e);
+    return new Set<number>();
+  }
+}
+
+export async function addSubscription(sub: any, userId: number): Promise<void> {
+  const storedSub = asStoredSubscription(sub, userId);
   if (USE_DB) {
-    const q = `INSERT INTO push_subscriptions(endpoint, subscription) VALUES($1, $2) ON CONFLICT (endpoint) DO NOTHING`;
+    const q = `
+      INSERT INTO push_subscriptions(endpoint, subscription)
+      VALUES($1, $2)
+      ON CONFLICT (endpoint)
+      DO UPDATE SET subscription = EXCLUDED.subscription
+    `;
     try {
-      await pool.query(q, [sub.endpoint, sub]);
+      await pool.query(q, [sub.endpoint, storedSub]);
     } catch (err) {
       console.error("Error inserting push subscription:", err);
       throw err;
@@ -58,9 +108,12 @@ export async function addSubscription(sub: any): Promise<void> {
   try {
     const all = readDb();
     // avoid duplicates by endpoint
-    const exists = all.find((s) => s.endpoint === sub.endpoint);
-    if (exists) return;
-    all.push(sub);
+    const existingIdx = all.findIndex((s) => s.endpoint === sub.endpoint);
+    if (existingIdx >= 0) {
+      all[existingIdx] = storedSub;
+    } else {
+      all.push(storedSub);
+    }
     writeDb(all);
   } catch (err) {
     console.error("Error adding subscription to file DB:", err);
@@ -103,7 +156,7 @@ export async function sendNotificationToAll(payload: any) {
   if (USE_DB) {
     try {
       const res = await pool.query(
-        "SELECT subscription FROM push_subscriptions"
+        "SELECT subscription FROM push_subscriptions",
       );
       subs = res.rows.map((r: any) => r.subscription).filter(Boolean);
     } catch (e) {
@@ -130,8 +183,9 @@ export async function sendNotificationToAll(payload: any) {
 
   const promises = subs.map((s) => {
     try {
+      const { __userId, ...pushSub } = s as StoredSubscription;
       return webpush
-        .sendNotification(s, JSON.stringify(payload))
+        .sendNotification(pushSub, JSON.stringify(payload))
         .catch((err: any) => {
           // If subscription is no longer valid, remove it
           if (err?.statusCode === 410 || err?.statusCode === 404) {
@@ -145,6 +199,77 @@ export async function sendNotificationToAll(payload: any) {
       return Promise.resolve();
     }
   });
+  await Promise.all(promises);
+}
+
+export async function sendNotificationForMachine(
+  payload: any,
+  machineId: string,
+) {
+  if (!machineId) return;
+
+  let subs: StoredSubscription[] = [];
+  if (USE_DB) {
+    try {
+      const res = await pool.query(
+        "SELECT subscription FROM push_subscriptions",
+      );
+      subs = res.rows.map((r: any) => r.subscription).filter(Boolean);
+    } catch (e) {
+      console.error("Error querying push subscriptions:", e);
+      subs = [];
+    }
+  } else {
+    subs = (getSubscriptions() as StoredSubscription[]) || [];
+  }
+
+  if (!subs.length) return;
+  const allowedUsers = await getAllowedUserIdsForMachine(machineId);
+  if (!allowedUsers.size) return;
+
+  const filteredSubs = subs.filter((sub) => {
+    const userId = getSubscriptionUserId(sub);
+    return userId != null && allowedUsers.has(userId);
+  });
+
+  if (!filteredSubs.length) return;
+
+  const vapidPublic = process.env.VAPID_PUBLIC_KEY;
+  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
+  if (!vapidPublic || !vapidPrivate) {
+    console.warn("VAPID keys not set; skipping push notifications");
+    return;
+  }
+  try {
+    webpush.setVapidDetails(subject, vapidPublic, vapidPrivate);
+  } catch (e) {
+    console.error("Error setting VAPID details:", e);
+    return;
+  }
+
+  const promises = filteredSubs.map((s) => {
+    try {
+      const { __userId, ...pushSub } = s as StoredSubscription;
+      return webpush
+        .sendNotification(pushSub, JSON.stringify(payload))
+        .catch((err: any) => {
+          if (err?.statusCode === 410 || err?.statusCode === 404) {
+            if (s.endpoint) removeSubscription(s.endpoint);
+          } else {
+            console.error(
+              "Error sending machine-scoped push to",
+              s.endpoint,
+              err,
+            );
+          }
+        });
+    } catch (err: any) {
+      console.error("Error sending machine-scoped push (sync):", err);
+      return Promise.resolve();
+    }
+  });
+
   await Promise.all(promises);
 }
 

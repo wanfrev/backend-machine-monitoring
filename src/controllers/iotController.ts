@@ -266,20 +266,23 @@ export const receiveData = async (req: Request, res: Response) => {
           }
 
           try {
-            const { sendNotificationToAll } =
+            const { sendNotificationForMachine } =
               await import("../utils/pushSubscriptions");
-            await sendNotificationToAll({
-              title: "Moneda ingresada",
-              body: `${machineRow.name} ${
-                machineRow.location ? `• ${machineRow.location}` : ""
-              }`.trim(),
-              data: {
-                machineId,
-                eventId,
-                amount: data.cantidad ?? 1,
-                timestamp: normalizedTs,
+            await sendNotificationForMachine(
+              {
+                title: "Moneda ingresada",
+                body: `${machineRow.name} ${
+                  machineRow.location ? `• ${machineRow.location}` : ""
+                }`.trim(),
+                data: {
+                  machineId,
+                  eventId,
+                  amount: data.cantidad ?? 1,
+                  timestamp: normalizedTs,
+                },
               },
-            });
+              machineId,
+            );
           } catch (pushErr) {
             console.error("Error enviando notificación push:", pushErr);
           }
@@ -320,22 +323,25 @@ export const receiveData = async (req: Request, res: Response) => {
         }
 
         try {
-          const { sendNotificationToAll } =
+          const { sendNotificationForMachine } =
             await import("../utils/pushSubscriptions");
-          await sendNotificationToAll({
-            title: "Máquina encendida",
-            body: `${machineRow.name} ${
-              machineRow.location ? `• ${machineRow.location}` : ""
-            } — reconectada`.trim(),
-            data: {
-              machineId,
-              eventId: onEventId,
-              eventType: "machine_on",
-              auto: true,
-              reason: "ping",
-              timestamp: onTs,
+          await sendNotificationForMachine(
+            {
+              title: "Máquina encendida",
+              body: `${machineRow.name} ${
+                machineRow.location ? `• ${machineRow.location}` : ""
+              } — reconectada`.trim(),
+              data: {
+                machineId,
+                eventId: onEventId,
+                eventType: "machine_on",
+                auto: true,
+                reason: "ping",
+                timestamp: onTs,
+              },
             },
-          });
+            machineId,
+          );
         } catch (pushErr) {
           console.error("Error enviando push auto machine_on:", pushErr);
         }
@@ -367,7 +373,7 @@ export const receiveData = async (req: Request, res: Response) => {
       }
 
       try {
-        const { sendNotificationToAll } =
+        const { sendNotificationForMachine } =
           await import("../utils/pushSubscriptions");
         const ts = normalizedTs;
         // Asegura que el timestamp se interprete como UTC si no tiene zona
@@ -393,20 +399,23 @@ export const receiveData = async (req: Request, res: Response) => {
         bodyParts.push(`${actionText} (${timeStr})`);
         if (data?.reason) bodyParts.push(`— ${data.reason}`);
 
-        await sendNotificationToAll({
-          title:
-            internalEvent === "machine_on"
-              ? "Máquina encendida"
-              : "Máquina apagada",
-          body: bodyParts.join(" "),
-          data: {
-            machineId,
-            eventId,
-            eventType: internalEvent,
-            ...data,
-            timestamp: ts,
+        await sendNotificationForMachine(
+          {
+            title:
+              internalEvent === "machine_on"
+                ? "Máquina encendida"
+                : "Máquina apagada",
+            body: bodyParts.join(" "),
+            data: {
+              machineId,
+              eventId,
+              eventType: internalEvent,
+              ...data,
+              timestamp: ts,
+            },
           },
-        });
+          machineId,
+        );
       } catch (pushErr) {
         console.error("Error enviando notificación push:", pushErr);
       }
