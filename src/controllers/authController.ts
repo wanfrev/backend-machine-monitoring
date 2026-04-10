@@ -19,6 +19,7 @@ export const login = async (req: Request, res: Response) => {
         u.shift,
         u.document_id,
         u.job_role,
+        u.operator_coin_balance AS "operatorCoinBalance",
         COALESCE(
           JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
           '[]'
@@ -26,7 +27,7 @@ export const login = async (req: Request, res: Response) => {
       FROM users u
       LEFT JOIN user_machines um ON um.user_id = u.id
       WHERE u.username = $1
-      GROUP BY u.id, u.username, u.password_hash, u.role, u.name, u.shift, u.document_id, u.job_role`,
+      GROUP BY u.id, u.username, u.password_hash, u.role, u.name, u.shift, u.document_id, u.job_role, u.operator_coin_balance`,
       [username]
     );
     const user = result.rows[0];
@@ -57,6 +58,7 @@ export const login = async (req: Request, res: Response) => {
         shift: user.shift,
         documentId: user.document_id,
         jobRole: user.job_role,
+        operatorCoinBalance: Number(user.operatorCoinBalance ?? 200),
         assignedMachineIds,
         assignedMachineId: primaryMachineId,
       },

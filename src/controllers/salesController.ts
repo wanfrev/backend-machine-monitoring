@@ -9,6 +9,13 @@ const isSupervisorJobRole = (jobRole: unknown) => {
   return /\bsupervisor\b/.test(jr);
 };
 
+const INITIAL_OPERATOR_COINS = 200;
+
+const isOperatorJobRole = (jobRole: unknown) => {
+  const jr = typeof jobRole === "string" ? jobRole.trim().toLowerCase() : "";
+  return jr.includes("operador");
+};
+
 async function getAuthUser(userId: number) {
   const result = await pool.query(
     `SELECT id, role, job_role AS "jobRole" FROM users WHERE id = $1`,
@@ -120,8 +127,11 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
     }
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+
+    const result = await client.query(
       `INSERT INTO employee_daily_sales (
         employee_id,
         machine_id,
@@ -170,10 +180,10 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
       prizeBs !== null ||
       (lost ?? 0) > 0 ||
       (returned ?? 0) > 0;
+    const entryCoinsValue = entryCoins ?? 0;
 
     if (shouldLogEntry) {
-      const entryCoinsValue = entryCoins ?? 0;
-      await pool.query(
+      await client.query(
         `INSERT INTO employee_daily_sale_entries (
           employee_id,
           machine_id,
@@ -195,12 +205,41 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
           returned,
         ],
       );
+
+      if (entryCoinsValue > 0) {
+        await client.query(
+          `UPDATE users
+           SET operator_coin_balance = GREATEST(
+             0,
+             COALESCE(operator_coin_balance, $1) - $2
+           )
+           WHERE id = $3`,
+          [INITIAL_OPERATOR_COINS, entryCoinsValue, employeeId],
+        );
+      }
     }
 
-    return res.json(result.rows[0]);
+    const balanceResult = await client.query(
+      `SELECT COALESCE(operator_coin_balance, $2) AS "remainingCoins"
+       FROM users
+       WHERE id = $1`,
+      [employeeId, INITIAL_OPERATOR_COINS],
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      ...result.rows[0],
+      remainingCoins: Number(
+        balanceResult.rows[0]?.remainingCoins ?? INITIAL_OPERATOR_COINS,
+      ),
+    });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Error upserting daily sale:", err);
     return res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 };
 
@@ -561,6 +600,125 @@ export const listDailySaleEntries = async (req: AuthRequest, res: Response) => {
     return res.json(result.rows);
   } catch (err) {
     console.error("Error listing daily sale entries:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getMyOperatorCoinBalance = async (
+  req: AuthRequest,
+  res: Response,
+) => {
+  const authUserId = Number(req.user?.id);
+  if (!Number.isFinite(authUserId)) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT COALESCE(operator_coin_balance, $2) AS "remainingCoins"
+       FROM users
+       WHERE id = $1`,
+      [authUserId, INITIAL_OPERATOR_COINS],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.json({
+      remainingCoins: Number(
+        result.rows[0]?.remainingCoins ?? INITIAL_OPERATOR_COINS,
+      ),
+    });
+  } catch (err) {
+    console.error("Error getting operator coin balance:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const resetOperatorCoinBalance = async (
+  req: AuthRequest,
+  res: Response,
+) => {
+  const authUserId = Number(req.user?.id);
+  const employeeId = Number(req.params?.employeeId);
+
+  if (!Number.isFinite(authUserId)) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+  if (!Number.isFinite(employeeId)) {
+    return res.status(400).json({ message: "Invalid employeeId" });
+  }
+
+  const authUser = await getAuthUser(authUserId);
+  if (!authUser) {
+    return res.status(401).json({ message: "User not found" });
+  }
+
+  const isAdmin = authUser.role === "admin";
+  const isSupervisor = isSupervisorJobRole(authUser.jobRole);
+  if (!isAdmin && !isSupervisor) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  try {
+    const targetUserResult = await pool.query(
+      `SELECT id, role, job_role AS "jobRole"
+       FROM users
+       WHERE id = $1`,
+      [employeeId],
+    );
+
+    if (targetUserResult.rowCount === 0) {
+      return res.status(404).json({ message: "Employee not found" });
+    }
+
+    const targetUser = targetUserResult.rows[0] as {
+      id: number;
+      role: "admin" | "employee";
+      jobRole: string | null;
+    };
+
+    if (targetUser.role !== "employee" || !isOperatorJobRole(targetUser.jobRole)) {
+      return res.status(400).json({ message: "Solo se puede resetear operadores" });
+    }
+
+    if (!isAdmin) {
+      const supervisorMachineIds = await getUserMachineIds(authUserId);
+      if (!supervisorMachineIds.length) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const scopeResult = await pool.query(
+        `SELECT 1
+         FROM user_machines
+         WHERE user_id = $1
+           AND machine_id = ANY($2::text[])
+         LIMIT 1`,
+        [employeeId, supervisorMachineIds],
+      );
+
+      if (scopeResult.rowCount === 0) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET operator_coin_balance = $2
+       WHERE id = $1
+       RETURNING id, operator_coin_balance AS "remainingCoins"`,
+      [employeeId, INITIAL_OPERATOR_COINS],
+    );
+
+    return res.json({
+      employeeId: Number(result.rows[0]?.id ?? employeeId),
+      remainingCoins: Number(
+        result.rows[0]?.remainingCoins ?? INITIAL_OPERATOR_COINS,
+      ),
+    });
+  } catch (err) {
+    console.error("Error resetting operator coin balance:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

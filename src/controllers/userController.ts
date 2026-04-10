@@ -19,13 +19,14 @@ export const getUsers = (req: Request, res: Response) => {
         u.shift,
         u.document_id AS "documentId",
         u.job_role AS "jobRole",
+        u.operator_coin_balance AS "operatorCoinBalance",
         COALESCE(
           JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
           '[]'::json
         ) AS "assignedMachineIds"
       FROM users u
       LEFT JOIN user_machines um ON um.user_id = u.id
-      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role`,
+      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role, u.operator_coin_balance`,
     )
     .then((result) => res.json(result.rows))
     .catch((err) => {
@@ -91,7 +92,8 @@ export const createUser = async (req: Request, res: Response) => {
           name,
           shift,
           document_id AS "documentId",
-          job_role AS "jobRole"`,
+          job_role AS "jobRole",
+          operator_coin_balance AS "operatorCoinBalance"`,
         [
           username,
           passwordHash,
@@ -195,7 +197,7 @@ export const updateUser = async (req: Request, res: Response) => {
           job_role = $5,
           role = $6
         WHERE id = $7
-        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", operator_coin_balance AS "operatorCoinBalance"`,
         [passwordHash, name, shift, documentId, jobRole, role, id],
       );
     } else {
@@ -207,7 +209,7 @@ export const updateUser = async (req: Request, res: Response) => {
           job_role = $4,
           role = $5
         WHERE id = $6
-        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
+        RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", operator_coin_balance AS "operatorCoinBalance"`,
         [name, shift, documentId, jobRole, role, id],
       );
     }
@@ -286,6 +288,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
         u.shift,
         u.document_id AS "documentId",
         u.job_role AS "jobRole",
+        u.operator_coin_balance AS "operatorCoinBalance",
         COALESCE(
           JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
           '[]'::json
@@ -293,7 +296,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       FROM users u
       LEFT JOIN user_machines um ON um.user_id = u.id
       WHERE u.id = $1
-      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role`,
+      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role, u.operator_coin_balance`,
       [userId],
     );
     if (result.rowCount === 0) {
@@ -347,7 +350,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
          name = COALESCE(NULLIF($1, ''), name),
          username = COALESCE(NULLIF($2, ''), username)
        WHERE id = $3
-       RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole"`,
+       RETURNING id, username, role, name, shift, document_id AS "documentId", job_role AS "jobRole", operator_coin_balance AS "operatorCoinBalance"`,
       [name, username, userId],
     );
 
