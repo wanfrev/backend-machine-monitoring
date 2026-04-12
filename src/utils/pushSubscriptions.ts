@@ -9,6 +9,8 @@ type StoredSubscription = {
   [key: string]: any;
 };
 
+type WebPushSubscription = Parameters<typeof webpush.sendNotification>[0];
+
 // Allow configuring a storage path outside the repo to avoid process watchers
 // restarting the app when the file is written. Default: <cwd>/data/push_subscriptions.json
 const DEFAULT_DATA_DIR = path.join(process.cwd(), "data");
@@ -62,6 +64,22 @@ function getSubscriptionUserId(sub: StoredSubscription): number | null {
   if (typeof raw === "number" && Number.isInteger(raw)) return raw;
   if (typeof raw === "string" && /^\d+$/.test(raw)) return Number(raw);
   return null;
+}
+
+function toWebPushSubscription(
+  sub: StoredSubscription,
+): WebPushSubscription | null {
+  const { __userId, ...pushSub } = sub;
+  const candidate = pushSub as {
+    endpoint?: unknown;
+    keys?: { p256dh?: unknown; auth?: unknown };
+  };
+
+  if (typeof candidate.endpoint !== "string") return null;
+  if (typeof candidate.keys?.p256dh !== "string") return null;
+  if (typeof candidate.keys?.auth !== "string") return null;
+
+  return pushSub as WebPushSubscription;
 }
 
 async function getAllowedUserIdsForMachine(
@@ -183,7 +201,8 @@ export async function sendNotificationToAll(payload: any) {
 
   const promises = subs.map((s) => {
     try {
-      const { __userId, ...pushSub } = s as StoredSubscription;
+      const pushSub = toWebPushSubscription(s as StoredSubscription);
+      if (!pushSub) return Promise.resolve();
       return webpush
         .sendNotification(pushSub, JSON.stringify(payload))
         .catch((err: any) => {
@@ -250,7 +269,8 @@ export async function sendNotificationForMachine(
 
   const promises = filteredSubs.map((s) => {
     try {
-      const { __userId, ...pushSub } = s as StoredSubscription;
+      const pushSub = toWebPushSubscription(s as StoredSubscription);
+      if (!pushSub) return Promise.resolve();
       return webpush
         .sendNotification(pushSub, JSON.stringify(payload))
         .catch((err: any) => {

@@ -39,6 +39,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.15.6",
+    "@types/web-push": "^3.6.4",
     "node-pg-migrate": "^7.6.1",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",

@@ -9,8 +9,11 @@ export const login = async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   try {
-    const result = await pool.query(
-      `SELECT
+    let result;
+
+    try {
+      result = await pool.query(
+        `SELECT
         u.id,
         u.username,
         u.password_hash,
@@ -28,8 +31,32 @@ export const login = async (req: Request, res: Response) => {
       LEFT JOIN user_machines um ON um.user_id = u.id
       WHERE u.username = $1
       GROUP BY u.id, u.username, u.password_hash, u.role, u.name, u.shift, u.document_id, u.job_role, u.operator_coin_balance`,
-      [username]
-    );
+        [username],
+      );
+    } catch (dbErr: any) {
+      // Backward compatibility for databases that have not applied all latest migrations.
+      if (dbErr?.code === "42P01" || dbErr?.code === "42703") {
+        result = await pool.query(
+          `SELECT
+            u.id,
+            u.username,
+            u.password_hash,
+            u.role,
+            u.name,
+            u.shift,
+            u.document_id,
+            u.job_role,
+            200 AS "operatorCoinBalance",
+            '[]'::json AS "assignedMachineIds"
+          FROM users u
+          WHERE u.username = $1`,
+          [username],
+        );
+      } else {
+        throw dbErr;
+      }
+    }
+
     const user = result.rows[0];
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -41,7 +68,7 @@ export const login = async (req: Request, res: Response) => {
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role },
       SECRET_KEY,
-      { expiresIn: "365d" }
+      { expiresIn: "365d" },
     );
 
     const assignedMachineIds: string[] =
@@ -65,6 +92,10 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("Error in login:", err);
+    const dbCode = (err as { code?: string } | null)?.code;
+    if (dbCode === "ETIMEDOUT" || dbCode === "ECONNREFUSED") {
+      return res.status(503).json({ message: "Database unavailable" });
+    }
     res.status(500).json({ message: "Server error" });
   }
 };
