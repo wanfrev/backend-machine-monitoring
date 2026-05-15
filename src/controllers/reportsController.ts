@@ -179,6 +179,15 @@ export const upsertWeeklyReport = async (req: AuthRequest, res: Response) => {
         ],
       );
 
+      await pool.query(
+        `UPDATE users
+         SET operator_coin_balance = $2
+         WHERE id = $1
+           AND role = 'employee'
+           AND COALESCE(job_role, '') NOT ILIKE '%supervisor%'`,
+        [employeeId, remainingCoins],
+      );
+
       return res.json(result.rows[0]);
     }
 
@@ -254,6 +263,15 @@ export const upsertWeeklyReport = async (req: AuthRequest, res: Response) => {
         premio,
         total,
       ],
+    );
+
+    await pool.query(
+      `UPDATE users
+       SET operator_coin_balance = $2
+       WHERE id = $1
+         AND role = 'employee'
+         AND COALESCE(job_role, '') NOT ILIKE '%supervisor%'`,
+      [employeeId, remainingCoins],
     );
 
     return res.json(result.rows[0]);

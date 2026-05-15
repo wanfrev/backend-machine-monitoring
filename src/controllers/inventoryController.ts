@@ -403,10 +403,12 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
        machine_available AS (
          SELECT
            um.machine_id,
-           MAX(COALESCE(u.operator_coin_balance, 200)) AS available_coins
+           SUM(COALESCE(u.operator_coin_balance, 200)) AS available_coins
          FROM user_machines um
          JOIN users u ON u.id = um.user_id
          WHERE um.machine_id IN (SELECT id FROM allowed_machines)
+           AND u.role = 'employee'
+           AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
          GROUP BY um.machine_id
        )
        SELECT
@@ -446,25 +448,6 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
       `SELECT COALESCE(rate, 0) AS rate FROM exchange_rate_config WHERE id = 1`,
     );
     const exchangeRate = Number(rateResult.rows[0]?.rate ?? 0);
-
-    const availableSummaryResult = await pool.query(
-      `SELECT COALESCE(SUM(operator_balance), 0) AS "availableCoins"
-       FROM (
-         SELECT DISTINCT
-           u.id,
-           COALESCE(u.operator_coin_balance, 200) AS operator_balance
-         FROM users u
-         JOIN user_machines um ON um.user_id = u.id
-         WHERE ($1::boolean = true OR um.machine_id = ANY($2::text[]))
-           AND ($3::text IS NULL OR um.machine_id = $3::text)
-           AND u.role = 'employee'
-           AND COALESCE(u.job_role, '') NOT ILIKE '%supervisor%'
-       ) scoped_operators`,
-      [authUser.role === "admin", supervisorMachineIds, machineId],
-    );
-    const summaryAvailableCoins = Number(
-      availableSummaryResult.rows[0]?.availableCoins ?? 0,
-    );
 
     const machines: InventoryMachineRow[] = (result.rows as InventoryQueryRow[]).map(
       (row) => {
@@ -543,8 +526,6 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
         },
       },
     );
-    summary.availableCoins = summaryAvailableCoins;
-
     return res.json({
       filters: {
         period,
