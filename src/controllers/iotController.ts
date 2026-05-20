@@ -187,11 +187,14 @@ export const receiveData = async (req: Request, res: Response) => {
       }
     }
 
-    // Insertar evento
-    const eventResult = await pool.query(
-      "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
-      [machineId, internalEvent, normalizedTs, data],
-    );
+    // Insertar evento (ignorar pings para no saturar la BDD)
+    let eventResult;
+    if (internalEvent !== "ping") {
+      eventResult = await pool.query(
+        "INSERT INTO machine_events (machine_id, type, timestamp, data) VALUES ($1, $2, $3, $4) RETURNING id",
+        [machineId, internalEvent, normalizedTs, data],
+      );
+    }
 
     // Si es evento de moneda, insertar en coins
     if (internalEvent === "coin_inserted") {

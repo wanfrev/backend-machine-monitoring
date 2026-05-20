@@ -144,11 +144,11 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
       ) VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)
       ON CONFLICT (employee_id, machine_id, sale_date)
       DO UPDATE SET
-        coins = EXCLUDED.coins,
-        record_message = EXCLUDED.record_message,
-        prize_bs = EXCLUDED.prize_bs,
-        lost = EXCLUDED.lost,
-        returned = EXCLUDED.returned,
+        coins = CASE WHEN $9::int IS NOT NULL THEN employee_daily_sales.coins + $9::int ELSE EXCLUDED.coins END,
+        record_message = COALESCE(EXCLUDED.record_message, employee_daily_sales.record_message),
+        prize_bs = COALESCE(EXCLUDED.prize_bs, employee_daily_sales.prize_bs),
+        lost = COALESCE(EXCLUDED.lost, employee_daily_sales.lost),
+        returned = COALESCE(EXCLUDED.returned, employee_daily_sales.returned),
         updated_at = NOW()
       RETURNING
         id,
@@ -171,6 +171,7 @@ export const upsertDailySale = async (req: AuthRequest, res: Response) => {
         prizeBs,
         lost,
         returned,
+        entryCoins,
       ],
     );
 
