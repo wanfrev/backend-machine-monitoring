@@ -197,7 +197,7 @@ export const receiveData = async (req: Request, res: Response) => {
     }
 
     // Si es evento de moneda, insertar en coins
-    if (internalEvent === "coin_inserted") {
+    if (internalEvent === "coin_inserted" && eventResult) {
       const eventId = eventResult.rows[0].id;
       try {
         // Refresh machine row to ensure we use the latest status/test_mode
@@ -354,7 +354,7 @@ export const receiveData = async (req: Request, res: Response) => {
     }
 
     // Si es evento de encendido/apagado, emitir por Socket.IO y enviar push
-    if (internalEvent === "machine_on" || internalEvent === "machine_off") {
+    if ((internalEvent === "machine_on" || internalEvent === "machine_off") && eventResult) {
       const eventId = eventResult.rows[0].id;
       try {
         const io = req.app.get("io");
