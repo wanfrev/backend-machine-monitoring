@@ -35,6 +35,47 @@ export const getUsers = (req: Request, res: Response) => {
     });
 };
 
+export const getMyTeamUsers = (req: AuthRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ message: "Access token required" });
+  }
+  pool
+    .query(
+      `SELECT
+        u.id,
+        u.username,
+        u.role,
+        u.name,
+        u.shift,
+        u.document_id AS "documentId",
+        u.job_role AS "jobRole",
+        u.operator_coin_balance AS "operatorCoinBalance",
+        COALESCE(
+          JSON_AGG(um.machine_id) FILTER (WHERE um.machine_id IS NOT NULL),
+          '[]'::json
+        ) AS "assignedMachineIds"
+      FROM users u
+      LEFT JOIN user_machines um ON um.user_id = u.id
+      WHERE u.id IN (
+        SELECT DISTINCT um2.user_id
+        FROM user_machines um2
+        WHERE um2.machine_id IN (
+          SELECT um3.machine_id FROM user_machines um3 WHERE um3.user_id = $1
+        )
+      )
+      AND u.id != $1
+      AND u.role = 'employee'
+      GROUP BY u.id, u.username, u.role, u.name, u.shift, u.document_id, u.job_role, u.operator_coin_balance`,
+      [userId],
+    )
+    .then((result) => res.json(result.rows))
+    .catch((err) => {
+      console.error("Error fetching team users:", err);
+      res.status(500).json({ message: "Server error" });
+    });
+};
+
 export const createUser = async (req: Request, res: Response) => {
   // Log de depuración para ver exactamente qué llega desde el frontend
   console.log("[createUser] Incoming body:", req.body);

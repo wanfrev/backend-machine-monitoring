@@ -6,6 +6,7 @@ import {
   updateUser,
   getMe,
   updateMe,
+  getMyTeamUsers,
 } from "../controllers/userController";
 import { authenticateToken, requireAdmin } from "../middleware/authMiddleware";
 
@@ -16,6 +17,9 @@ router.use(authenticateToken); // All user routes require auth
 // Self profile routes (no admin required)
 router.get("/me", getMe);
 router.put("/me", updateMe);
+
+// Team users for supervisors (only their assigned machines' operators)
+router.get("/my-team", getMyTeamUsers);
 
 // Admin-only user management
 router.use(requireAdmin);

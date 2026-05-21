@@ -248,47 +248,7 @@ export const receiveData = async (req: Request, res: Response) => {
             );
           }
 
-          try {
-            const io = req.app.get("io");
-            if (io) {
-              io.emit("coin_inserted", {
-                machineId,
-                machineName: machineRow.name,
-                location: machineRow.location,
-                eventId,
-                amount: data.cantidad ?? 1,
-                timestamp: normalizedTs,
-                test: !!machineRow.test_mode,
-              });
-            }
-          } catch (socketErr) {
-            console.error(
-              "Error emitiendo evento coin_inserted por Socket.IO:",
-              socketErr,
-            );
-          }
-
-          try {
-            const { sendNotificationForMachine } =
-              await import("../utils/pushSubscriptions");
-            await sendNotificationForMachine(
-              {
-                title: "Moneda ingresada",
-                body: `${machineRow.name} ${
-                  machineRow.location ? `• ${machineRow.location}` : ""
-                }`.trim(),
-                data: {
-                  machineId,
-                  eventId,
-                  amount: data.cantidad ?? 1,
-                  timestamp: normalizedTs,
-                },
-              },
-              machineId,
-            );
-          } catch (pushErr) {
-            console.error("Error enviando notificación push:", pushErr);
-          }
+          // Coin notifications removed - only coin persistence kept
         }
       } catch (err) {
         console.error("Error insertando en coins:", err);
