@@ -293,6 +293,105 @@ export async function sendNotificationForMachine(
   await Promise.all(promises);
 }
 
+async function getAllowedUserIdsForOperatorReport(
+  employeeId: number,
+): Promise<Set<number>> {
+  try {
+    const res = await pool.query(
+      `SELECT DISTINCT u.id
+       FROM users u
+       WHERE u.role = 'admin'
+       UNION
+       SELECT DISTINCT u.id
+       FROM users u
+       JOIN user_machines um ON um.user_id = u.id
+       WHERE u.job_role ILIKE '%supervisor%'
+         AND um.machine_id IN (
+           SELECT machine_id FROM user_machines WHERE user_id = $1
+         )`,
+      [employeeId],
+    );
+    return new Set(
+      res.rows
+        .map((r: any) => Number(r.id))
+        .filter((n: number) => Number.isInteger(n)),
+    );
+  } catch (e) {
+    console.error("Error querying allowed users for operator report push:", e);
+    return new Set<number>();
+  }
+}
+
+export async function sendNotificationForOperatorReport(
+  payload: any,
+  employeeId: number,
+) {
+  let subs: StoredSubscription[] = [];
+  if (USE_DB) {
+    try {
+      const res = await pool.query(
+        "SELECT subscription FROM push_subscriptions",
+      );
+      subs = res.rows.map((r: any) => r.subscription).filter(Boolean);
+    } catch (e) {
+      console.error("Error querying push subscriptions:", e);
+      subs = [];
+    }
+  } else {
+    subs = (getSubscriptions() as StoredSubscription[]) || [];
+  }
+
+  if (!subs.length) return;
+  const allowedUsers = await getAllowedUserIdsForOperatorReport(employeeId);
+  if (!allowedUsers.size) return;
+
+  const filteredSubs = subs.filter((sub) => {
+    const userId = getSubscriptionUserId(sub);
+    return userId != null && allowedUsers.has(userId);
+  });
+
+  if (!filteredSubs.length) return;
+
+  const vapidPublic = process.env.VAPID_PUBLIC_KEY;
+  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
+  if (!vapidPublic || !vapidPrivate) {
+    console.warn("VAPID keys not set; skipping push notifications");
+    return;
+  }
+  try {
+    webpush.setVapidDetails(subject, vapidPublic, vapidPrivate);
+  } catch (e) {
+    console.error("Error setting VAPID details:", e);
+    return;
+  }
+
+  const promises = filteredSubs.map((s) => {
+    try {
+      const pushSub = toWebPushSubscription(s as StoredSubscription);
+      if (!pushSub) return Promise.resolve();
+      return webpush
+        .sendNotification(pushSub, JSON.stringify(payload))
+        .catch((err: any) => {
+          if (err?.statusCode === 410 || err?.statusCode === 404) {
+            if (s.endpoint) removeSubscription(s.endpoint);
+          } else {
+            console.error(
+              "Error sending report-scoped push to",
+              s.endpoint,
+              err,
+            );
+          }
+        });
+    } catch (err: any) {
+      console.error("Error sending report-scoped push (sync):", err);
+      return Promise.resolve();
+    }
+  });
+
+  await Promise.all(promises);
+}
+
 export function getVapidPublicKey() {
   return process.env.VAPID_PUBLIC_KEY || null;
 }

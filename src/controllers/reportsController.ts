@@ -188,6 +188,32 @@ export const upsertWeeklyReport = async (req: AuthRequest, res: Response) => {
         [employeeId, remainingCoins],
       );
 
+      try {
+        const employeeRes = await pool.query(
+          "SELECT name FROM users WHERE id = $1",
+          [employeeId],
+        );
+        const employeeName = employeeRes.rows[0]?.name || `Empleado #${employeeId}`;
+        const { sendNotificationForOperatorReport } =
+          await import("../utils/pushSubscriptions");
+        await sendNotificationForOperatorReport(
+          {
+            title: "Reporte diario recibido",
+            body: `${employeeName} • ${weekEndDate}`,
+            data: {
+              eventType: "daily_report",
+              employeeId,
+              employeeName,
+              timestamp: new Date().toISOString(),
+              reportDate: weekEndDate,
+            },
+          },
+          employeeId,
+        );
+      } catch (notifErr) {
+        console.error("Error enviando notificación de reporte:", notifErr);
+      }
+
       return res.json(result.rows[0]);
     }
 
