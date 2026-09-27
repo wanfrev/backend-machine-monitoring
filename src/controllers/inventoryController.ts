@@ -19,6 +19,8 @@ type InventoryMachineRow = {
   coinLossBolivares: number;
   total: number;
   totalUsdEquivalent: number;
+  premioUsdEquivalent: number;
+  netUsdEquivalent: number;
   events: { record: number; premio: number; perdidas: number; devueltas: number };
 };
 
@@ -35,6 +37,8 @@ type InventorySummary = {
   coinLossBolivares: number;
   total: number;
   totalUsdEquivalent: number;
+  premioUsdEquivalent: number;
+  netUsdEquivalent: number;
   events: { record: number; premio: number; perdidas: number; devueltas: number };
 };
 
@@ -218,6 +222,8 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
           coinLossBolivares: 0,
           total: 0,
           totalUsdEquivalent: 0,
+          premioUsdEquivalent: 0,
+          netUsdEquivalent: 0,
           events: { record: 0, premio: 0, perdidas: 0, devueltas: 0 },
         },
         machines: [],
@@ -458,6 +464,9 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
         const vesNet = bolivares + pagoMovil;
         const totalUsdEquivalent =
           dolares + (exchangeRate > 0 ? vesNet / exchangeRate : 0);
+        const premioUsdEquivalent =
+          exchangeRate > 0 ? Number(row.premio || 0) / exchangeRate : 0;
+        const netUsdEquivalent = totalUsdEquivalent - premioUsdEquivalent;
         return {
           machineId: String(row.machineId),
           machineName: String(row.machineName || row.machineId),
@@ -475,6 +484,8 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
           coinLossBolivares,
           total: Number(row.total || 0),
           totalUsdEquivalent,
+          premioUsdEquivalent,
+          netUsdEquivalent,
           events: {
             record: Number(row.recordEvents || 0),
             premio: Number(row.premioEvents || 0),
@@ -499,6 +510,8 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
         acc.coinLossBolivares += row.coinLossBolivares;
         acc.total += row.total;
         acc.totalUsdEquivalent += row.totalUsdEquivalent;
+        acc.premioUsdEquivalent += row.premioUsdEquivalent;
+        acc.netUsdEquivalent += row.netUsdEquivalent;
         acc.events.record += row.events.record;
         acc.events.premio += row.events.premio;
         acc.events.perdidas += row.events.perdidas;
@@ -518,6 +531,8 @@ export const getInventorySummary = async (req: AuthRequest, res: Response) => {
         coinLossBolivares: 0,
         total: 0,
         totalUsdEquivalent: 0,
+        premioUsdEquivalent: 0,
+        netUsdEquivalent: 0,
         events: {
           record: 0,
           premio: 0,
