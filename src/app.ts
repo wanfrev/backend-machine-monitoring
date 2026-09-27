@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import { json } from "body-parser";
 import authRoutes from "./routes/authRoutes";
 import machineRoutes from "./routes/machineRoutes";
@@ -16,6 +17,7 @@ const app = express();
 
 // Middleware
 app.use(cors());
+app.use(compression());
 app.use(json());
 
 // Routes

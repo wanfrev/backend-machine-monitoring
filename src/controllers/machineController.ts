@@ -1,49 +1,89 @@
+import { Request, Response } from "express";
+import { pool } from "../db";
+import { Machine } from "../models/types";
+
+// Zona horaria del negocio: los "días" de ingresos se cuentan en hora de Caracas.
+const BUSINESS_TZ = "America/Caracas";
+
+const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+const isYm = (s: string) => /^\d{4}-\d{2}$/.test(s);
+
+const asTrimmedString = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+// Acepta `YYYY-MM-DD` o `YYYY-MM` (se expande a los límites del mes) y descarta
+// cualquier otro formato para no pasar valores inválidos a Postgres.
+function normalizeDayRange(
+  startDate: unknown,
+  endDate: unknown,
+): { sd: string | null; ed: string | null } {
+  let sd = asTrimmedString(startDate) || null;
+  let ed = asTrimmedString(endDate) || null;
+
+  if (sd && isYm(sd)) {
+    sd = `${sd}-01`;
+  } else if (sd && !isYmd(sd)) {
+    sd = null;
+  }
+
+  if (ed && isYm(ed)) {
+    const [y, m] = ed.split("-").map((p) => Number(p));
+    const last = new Date(y || 0, m || 1, 0).getDate();
+    ed = `${ed}-${String(last).padStart(2, "0")}`;
+  } else if (ed && !isYmd(ed)) {
+    ed = null;
+  }
+
+  return { sd, ed };
+}
+
+// Fecha de la query tal cual (Postgres la valida con ::date), o null si no viene.
+const asDateParam = (v: unknown) => asTrimmedString(v) || null;
+
+// Filtro por día local escrito como rango sobre la columna cruda.
+// `DATE(col AT TIME ZONE ...) >= x` envuelve la columna en una función y Postgres
+// no puede usar índices (escanea toda la tabla). Esta forma es equivalente
+// (día local >= x  <=>  col >= inicio de x en Caracas) y sí los usa.
+function pushLocalDayRange(
+  where: string[],
+  params: unknown[],
+  column: string,
+  start: string | null,
+  end: string | null,
+) {
+  if (start) {
+    params.push(start);
+    where.push(
+      `${column} >= (($${params.length}::date)::timestamp AT TIME ZONE '${BUSINESS_TZ}')`,
+    );
+  }
+  if (end) {
+    params.push(end);
+    where.push(
+      `${column} < ((($${params.length}::date + 1)::timestamp) AT TIME ZONE '${BUSINESS_TZ}')`,
+    );
+  }
+}
+
 // Ingresos diarios por máquina (para la gráfica de resumen)
 export const getMachineDailyIncome = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
-    // Normalize and validate date query params to avoid passing invalid values
-    // Accept either full date `YYYY-MM-DD` or month `YYYY-MM` (convert to month bounds).
-    const asString = (v: any) => (typeof v === "string" ? v.trim() : "");
-    let sd = asString(startDate) || null;
-    let ed = asString(endDate) || null;
-
-    const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const isYm = (s: string) => /^\d{4}-\d{2}$/.test(s);
-    const daysInMonth = (y: number, m: number) => new Date(y, m, 0).getDate();
-
-    if (sd && isYm(sd)) {
-      // convert YYYY-MM -> YYYY-MM-01
-      sd = `${sd}-01`;
-    } else if (sd && !isYmd(sd)) {
-      sd = null;
-    }
-
-    if (ed && isYm(ed)) {
-      // convert YYYY-MM -> last day of month
-      const parts = ed.split("-").map((p) => Number(p));
-      const y = parts[0] || 0;
-      const m = parts[1] || 1;
-      const last = daysInMonth(y, m);
-      ed = `${ed}-${String(last).padStart(2, "0")}`;
-    } else if (ed && !isYmd(ed)) {
-      ed = null;
-    }
+    const { sd, ed } = normalizeDayRange(startDate, endDate);
     // Usar la tabla coins para contar monedas por día en zona horaria local.
     // Cada registro en coins representa una moneda insertada.
-    // Ajustar aquí la zona horaria a la de tus máquinas/negocio.
+    const params: unknown[] = [id];
+    const where = ["machine_id = $1"];
+    pushLocalDayRange(where, params, '"timestamp"', sd, ed);
     const result = await pool.query(
-      `SELECT 
-        DATE(timestamp AT TIME ZONE 'America/Caracas') AS date,
+      `SELECT
+        DATE("timestamp" AT TIME ZONE '${BUSINESS_TZ}') AS date,
         COUNT(*) AS income
       FROM coins
-      WHERE machine_id = $1
-        AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
-        AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
-      GROUP BY DATE(timestamp AT TIME ZONE 'America/Caracas')
-      ORDER BY DATE(timestamp AT TIME ZONE 'America/Caracas')`,
-      [id, sd || null, ed || null],
+      WHERE ${where.join(" AND ")}
+      GROUP BY 1
+      ORDER BY 1`,
+      params,
     );
     res.json(
       result.rows.map((r: any) => ({ date: r.date, income: Number(r.income) })),
@@ -53,6 +93,46 @@ export const getMachineDailyIncome = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// Ingresos diarios de TODAS las máquinas en una sola consulta.
+// El dashboard antes hacía una petición por máquina (N+1) cada pocos segundos.
+export const getAllMachinesDailyIncome = async (
+  req: Request,
+  res: Response,
+) => {
+  const { startDate, endDate } = req.query;
+  try {
+    const { sd, ed } = normalizeDayRange(startDate, endDate);
+    if (!sd) {
+      return res.status(400).json({ message: "startDate is required" });
+    }
+    const params: unknown[] = [];
+    const where: string[] = [];
+    pushLocalDayRange(where, params, '"timestamp"', sd, ed);
+    const result = await pool.query(
+      `SELECT
+        machine_id,
+        TO_CHAR("timestamp" AT TIME ZONE '${BUSINESS_TZ}', 'YYYY-MM-DD') AS date,
+        COUNT(*) AS income
+      FROM coins
+      WHERE ${where.join(" AND ")}
+      GROUP BY machine_id, 2
+      ORDER BY machine_id, 2`,
+      params,
+    );
+    res.json(
+      result.rows.map((r: any) => ({
+        machineId: r.machine_id,
+        date: r.date,
+        income: Number(r.income),
+      })),
+    );
+  } catch (err) {
+    console.error("Error fetching daily income for all machines:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // Devuelve el total de monedas agrupado por máquina
 export const getCoinsByMachine = async (req: Request, res: Response) => {
   try {
@@ -65,9 +145,7 @@ export const getCoinsByMachine = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-import { Request, Response } from "express";
-import { pool } from "../db";
-import { Machine } from "../models/types";
+
 
 // Genera un ID secuencial en base al tipo de máquina
 // Ej: "Boxeo" -> "Maquina_Boxeo_01", "Maquina_Boxeo_02", etc.
@@ -328,15 +406,24 @@ export const getMachineHistory = async (req: Request, res: Response) => {
     // Return machine events but only include coin events that have a corresponding
     // row in the `coins` table (i.e. real/recorded coins). This preserves
     // device-sent historical events while ensuring the UI shows only real coins.
+    const params: unknown[] = [id];
+    const where = [
+      "me.machine_id = $1",
+      "(me.type <> 'coin_inserted' OR EXISTS (SELECT 1 FROM coins c WHERE c.event_id = me.id))",
+    ];
+    pushLocalDayRange(
+      where,
+      params,
+      "me.timestamp",
+      asDateParam(startDate),
+      asDateParam(endDate),
+    );
     const result = await pool.query(
       `SELECT me.*
        FROM machine_events me
-       WHERE me.machine_id = $1
-         AND (me.type <> 'coin_inserted' OR EXISTS (SELECT 1 FROM coins c WHERE c.event_id = me.id))
-         AND ($2::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
-         AND ($3::date IS NULL OR DATE(me.timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
+       WHERE ${where.join(" AND ")}
        ORDER BY me.timestamp DESC`,
-      [id, startDate || null, endDate || null],
+      params,
     );
 
     res.json(result.rows);
@@ -346,74 +433,124 @@ export const getMachineHistory = async (req: Request, res: Response) => {
   }
 };
 
+type PowerLogRow = { type: string; timestamp: Date };
+type PowerLog = {
+  event: "Encendido" | "Apagado";
+  ts: string;
+  dur: number | null;
+};
+
+// Normaliza distintos formatos de timestamp a un ISO UTC
+const normalizeToIsoUtc = (v: any): string => {
+  if (!v) return new Date().toISOString();
+  if (v instanceof Date) return v.toISOString();
+  const s = String(v);
+  // If the string already contains timezone info, trust it
+  if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  // Otherwise assume the stored value is naive and append Z to treat as UTC
+  const d2 = new Date(s + "Z");
+  if (!Number.isNaN(d2.getTime())) return d2.toISOString();
+  return new Date().toISOString();
+};
+
+// Convierte eventos machine_on/machine_off (ordenados ASC) en sesiones con duración.
+function buildPowerLogs(rows: PowerLogRow[]): PowerLog[] {
+  const logs: PowerLog[] = [];
+  let lastOnIndex: number | null = null;
+
+  for (const row of rows) {
+    const tsIso = normalizeToIsoUtc(row.timestamp);
+    if (row.type === "machine_on") {
+      logs.push({ event: "Encendido", ts: tsIso, dur: null });
+      lastOnIndex = logs.length - 1;
+    } else if (row.type === "machine_off") {
+      // Evento de apagado
+      if (lastOnIndex !== null) {
+        const onTs = new Date(logs[lastOnIndex].ts).getTime();
+        const offTs = new Date(tsIso).getTime();
+        if (offTs > onTs) {
+          const minutes = Math.round((offTs - onTs) / (1000 * 60));
+          logs[lastOnIndex].dur = minutes;
+        }
+        lastOnIndex = null;
+      }
+      logs.push({ event: "Apagado", ts: tsIso, dur: null });
+    }
+  }
+
+  return logs;
+}
+
 // Devuelve los eventos de encendido/apagado con duración estimada por sesión
 export const getMachinePowerLogs = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startDate, endDate } = req.query;
   try {
     // Use a consistent timezone when filtering by date to avoid day-shifts
+    const params: unknown[] = [id];
+    const where = [
+      "machine_id = $1",
+      "type IN ('machine_on', 'machine_off')",
+    ];
+    pushLocalDayRange(
+      where,
+      params,
+      '"timestamp"',
+      asDateParam(startDate),
+      asDateParam(endDate),
+    );
     const result = await pool.query(
-      `SELECT type, timestamp
+      `SELECT type, "timestamp"
        FROM machine_events
-       WHERE machine_id = $1
-         AND type IN ('machine_on', 'machine_off')
-         AND ($2::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') >= $2::date)
-         AND ($3::date IS NULL OR DATE(timestamp AT TIME ZONE 'America/Caracas') <= $3::date)
-       ORDER BY timestamp ASC`,
-      [id, startDate || null, endDate || null],
+       WHERE ${where.join(" AND ")}
+       ORDER BY "timestamp" ASC`,
+      params,
     );
 
-    type RawRow = { type: string; timestamp: Date };
-    type Log = {
-      event: "Encendido" | "Apagado";
-      ts: string;
-      dur: number | null;
-    };
-
-    const rows = result.rows as RawRow[];
-    const logs: Log[] = [];
-    let lastOnIndex: number | null = null;
-
-    // Helper: normalize various timestamp formats into an ISO UTC string
-    const normalizeToIsoUtc = (v: any): string => {
-      if (!v) return new Date().toISOString();
-      if (v instanceof Date) return v.toISOString();
-      const s = String(v);
-      // If the string already contains timezone info, trust it
-      if (s.endsWith("Z") || /[\+\-]\d{2}:?\d{2}/.test(s)) {
-        const d = new Date(s);
-        if (!Number.isNaN(d.getTime())) return d.toISOString();
-      }
-      // Otherwise assume the stored value is naive and append Z to treat as UTC
-      const maybe = s + "Z";
-      const d2 = new Date(maybe);
-      if (!Number.isNaN(d2.getTime())) return d2.toISOString();
-      return new Date().toISOString();
-    };
-
-    for (const row of rows) {
-      const tsIso = normalizeToIsoUtc(row.timestamp);
-      if (row.type === "machine_on") {
-        logs.push({ event: "Encendido", ts: tsIso, dur: null });
-        lastOnIndex = logs.length - 1;
-      } else if (row.type === "machine_off") {
-        // Evento de apagado
-        if (lastOnIndex !== null) {
-          const onTs = new Date(logs[lastOnIndex].ts).getTime();
-          const offTs = new Date(tsIso).getTime();
-          if (offTs > onTs) {
-            const minutes = Math.round((offTs - onTs) / (1000 * 60));
-            logs[lastOnIndex].dur = minutes;
-          }
-          lastOnIndex = null;
-        }
-        logs.push({ event: "Apagado", ts: tsIso, dur: null });
-      }
-    }
-
-    res.json(logs);
+    res.json(buildPowerLogs(result.rows as PowerLogRow[]));
   } catch (err) {
     console.error("Error fetching machine power logs:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Encendido/apagado de TODAS las máquinas en una sola consulta, agrupado por máquina.
+// Reemplaza una petición por máquina desde el dashboard.
+export const getAllMachinesPowerLogs = async (req: Request, res: Response) => {
+  const { startDate, endDate } = req.query;
+  try {
+    const sd = asDateParam(startDate);
+    if (!sd) {
+      return res.status(400).json({ message: "startDate is required" });
+    }
+    const params: unknown[] = [];
+    const where = ["type IN ('machine_on', 'machine_off')"];
+    pushLocalDayRange(where, params, '"timestamp"', sd, asDateParam(endDate));
+    const result = await pool.query(
+      `SELECT machine_id, type, "timestamp"
+       FROM machine_events
+       WHERE ${where.join(" AND ")}
+       ORDER BY machine_id, "timestamp" ASC`,
+      params,
+    );
+
+    const rowsByMachine = new Map<string, PowerLogRow[]>();
+    for (const row of result.rows as (PowerLogRow & { machine_id: string })[]) {
+      const list = rowsByMachine.get(row.machine_id);
+      if (list) list.push(row);
+      else rowsByMachine.set(row.machine_id, [row]);
+    }
+
+    const logsByMachine: Record<string, PowerLog[]> = {};
+    for (const [machineId, rows] of rowsByMachine) {
+      logsByMachine[machineId] = buildPowerLogs(rows);
+    }
+    res.json(logsByMachine);
+  } catch (err) {
+    console.error("Error fetching power logs for all machines:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

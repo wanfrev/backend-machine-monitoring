@@ -6,6 +6,18 @@ const HEARTBEAT_TIMEOUT_MS = Number(
   process.env.HEARTBEAT_TIMEOUT_MS || 2 * 60 * 1000,
 ); // 2 minutos
 
+// Envía el push sin bloquear la respuesta al dispositivo: la Raspberry espera este
+// HTTP y llegar a los servicios push puede tardar cientos de ms (o segundos si uno falla).
+function sendPushInBackground(payload: any, machineId: string) {
+  import("../utils/pushSubscriptions")
+    .then(({ sendNotificationForMachine }) =>
+      sendNotificationForMachine(payload, machineId),
+    )
+    .catch((pushErr) => {
+      console.error("Error enviando notificación push:", pushErr);
+    });
+}
+
 export const receiveData = async (req: Request, res: Response) => {
   try {
     const {
@@ -246,9 +258,28 @@ export const receiveData = async (req: Request, res: Response) => {
             console.log(
               `Coin registrada: machine_id=${machineId}, event_id=${eventId}`,
             );
+            // Tiempo real: el dashboard suma la moneda sin esperar al siguiente refresco.
+            // Solo se emite si la moneda quedó guardada (no test_mode, no duplicada).
+            // amount = 1 porque cada fila de coins cuenta como una moneda.
+            try {
+              const io = req.app.get("io");
+              if (io) {
+                io.emit("coin_inserted", {
+                  machineId,
+                  machineName: latestMachine.name,
+                  location: latestMachine.location,
+                  eventId,
+                  amount: 1,
+                  timestamp: now.toISOString(),
+                });
+              }
+            } catch (socketErr) {
+              console.error(
+                "Error emitiendo coin_inserted por Socket.IO:",
+                socketErr,
+              );
+            }
           }
-
-          // Coin notifications removed - only coin persistence kept
         }
       } catch (err) {
         console.error("Error insertando en coins:", err);
@@ -286,9 +317,7 @@ export const receiveData = async (req: Request, res: Response) => {
         }
 
         try {
-          const { sendNotificationForMachine } =
-            await import("../utils/pushSubscriptions");
-          await sendNotificationForMachine(
+          sendPushInBackground(
             {
               title: "Máquina encendida",
               body: `${machineRow.name} ${
@@ -336,8 +365,6 @@ export const receiveData = async (req: Request, res: Response) => {
       }
 
       try {
-        const { sendNotificationForMachine } =
-          await import("../utils/pushSubscriptions");
         const ts = normalizedTs;
         // Asegura que el timestamp se interprete como UTC si no tiene zona
         let dateObj: Date;
@@ -362,7 +389,7 @@ export const receiveData = async (req: Request, res: Response) => {
         bodyParts.push(`${actionText} (${timeStr})`);
         if (data?.reason) bodyParts.push(`— ${data.reason}`);
 
-        await sendNotificationForMachine(
+        sendPushInBackground(
           {
             title:
               internalEvent === "machine_on"

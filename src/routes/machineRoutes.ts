@@ -11,6 +11,8 @@ import {
   getTotalCoins,
   getCoinsByMachine,
   getMachineDailyIncome,
+  getAllMachinesDailyIncome,
+  getAllMachinesPowerLogs,
 } from "../controllers/machineController";
 import { authenticateToken, requireAdmin } from "../middleware/authMiddleware";
 
@@ -21,6 +23,10 @@ router.use(authenticateToken);
 router.get("/", getMachines);
 router.get("/coins/total", getTotalCoins);
 router.get("/coins/by-machine", getCoinsByMachine);
+// Agregados para el dashboard (una consulta para todas las máquinas).
+// Deben ir antes de "/:id".
+router.get("/income/daily", getAllMachinesDailyIncome);
+router.get("/power-logs", getAllMachinesPowerLogs);
 router.get("/:id", getMachineById);
 router.get("/:id/history", getMachineHistory);
 router.get("/:id/power-logs", getMachinePowerLogs);
